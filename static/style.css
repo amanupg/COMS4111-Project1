@@ -1,0 +1,13 @@
+body { font-size: 15px; font-family: Arial, sans-serif; margin: 0 auto; max-width: 1000px; padding: 0 16px 40px; line-height: 1.5; }
+header { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; padding: 12px 0; border-bottom: 1px solid #ccc; }
+header nav { display: flex; flex-wrap: wrap; gap: 14px; }
+header .who { margin-left: auto; color: #555; }
+table { border-collapse: collapse; margin: 12px 0; }
+th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; }
+th { background: #f3f3f3; }
+label { margin-right: 4px; margin-left: 10px; }
+form.inline { display: inline; }
+.flash { padding: 8px 12px; border-radius: 4px; }
+.flash.ok { background: #e6f4ea; color: #1e4620; }
+.flash.warn { background: #fdecea; color: #7a1c1c; }
+[role="alert"] { color: #9b1c1c; }

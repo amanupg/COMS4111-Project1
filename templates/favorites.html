@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Favorites{% endblock %}
+{% block content %}
+<h1>My favorite restaurants</h1>
+{% if rows %}
+<table>
+  <thead><tr><th>Restaurant</th><th>Cuisine</th><th>Zip</th><th>Added</th><th></th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td><a href="{{ url_for('restaurant', restaurant_id=r.restaurant_id) }}">{{ r.name }}</a></td>
+      <td>{{ r.cuisine }}</td>
+      <td>{{ r.restaurant_zip }}</td>
+      <td>{{ r.date_added }}</td>
+      <td>
+        <form method="POST" action="{{ url_for('favorites_remove') }}" class="inline">
+          <input type="hidden" name="restaurant_id" value="{{ r.restaurant_id }}">
+          <input type="hidden" name="next" value="{{ url_for('favorites') }}">
+          <button type="submit">Remove</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No favorites yet. <a href="{{ url_for('restaurants') }}">Find a restaurant</a> and add it.</p>
+{% endif %}
+{% endblock %}

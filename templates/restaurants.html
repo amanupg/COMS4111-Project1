@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Find restaurants{% endblock %}
+{% block content %}
+<h1>Find restaurants</h1>
+<form method="GET" action="{{ url_for('restaurants') }}">
+  <p>
+    <label for="cuisine">Cuisine</label>
+    <select id="cuisine" name="cuisine">
+      <option value="">Any</option>
+      {% for c in cuisines %}
+      <option value="{{ c }}" {% if c == form.cuisine %}selected{% endif %}>{{ c }}</option>
+      {% endfor %}
+    </select>
+    <label for="max_price">Max price ($)</label>
+    <input id="max_price" name="max_price" type="number" min="0" max="100000" value="{{ form.max_price if form.max_price is not none else '' }}">
+    <label for="zip">Zip code</label>
+    <input id="zip" name="zip" type="number" min="10001" max="11697" value="{{ form.zip if form.zip is not none else '' }}">
+    <label><input type="checkbox" name="open_now" {% if form.open_now %}checked{% endif %}> Open now</label>
+    <button type="submit">Search</button>
+  </p>
+</form>
+
+{% if results %}
+<table>
+  <thead><tr><th>Restaurant</th><th>Cuisine</th><th>Price range</th><th>Zip</th><th>Open now</th><th>Rating</th></tr></thead>
+  <tbody>
+  {% for r in results %}
+    <tr>
+      <td><a href="{{ url_for('restaurant', restaurant_id=r.restaurant_id) }}">{{ r.name }}</a></td>
+      <td>{{ r.cuisine }}</td>
+      <td>${{ r.min_price }} to ${{ r.max_price }}</td>
+      <td>{{ r.restaurant_zip }}</td>
+      <td>{{ 'Yes' if r.open_now else 'No' }}</td>
+      <td>{% if r.avg_rating is not none %}{{ '%.1f' % r.avg_rating }} ({{ r.num_reviews }}){% else %}no reviews yet{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No restaurants match those filters.</p>
+{% endif %}
+{% endblock %}

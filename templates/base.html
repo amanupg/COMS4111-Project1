@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Table Finder{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header>
+    <strong><a href="{{ url_for('index') }}">Table Finder</a></strong>
+    <nav>
+      <a href="{{ url_for('restaurants') }}">Find restaurants</a>
+      <a href="{{ url_for('availability') }}">Check availability</a>
+      <a href="{{ url_for('reservations') }}">My reservations</a>
+      <a href="{{ url_for('favorites') }}">Favorites</a>
+      <a href="{{ url_for('recommendations') }}">Recommendations</a>
+    </nav>
+    <span class="who">
+      {% if session.get('user_id') %}
+        Signed in as {{ session.get('user_name') }} (#{{ session.get('user_id') }})
+        <form method="POST" action="{{ url_for('logout') }}" class="inline"><button type="submit">Switch user</button></form>
+      {% else %}
+        No user selected
+      {% endif %}
+    </span>
+  </header>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <p class="flash {{ category }}" role="status">{{ message }}</p>
+    {% endfor %}
+  {% endwith %}
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

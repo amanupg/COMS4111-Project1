@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Recommendations{% endblock %}
+{% block content %}
+<h1>Restaurants you might like</h1>
+<p>Based on other users who share a favorite restaurant with you.</p>
+{% if rows %}
+<table>
+  <thead><tr><th>Restaurant</th><th>Cuisine</th><th>Similar users who favorited it</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td><a href="{{ url_for('restaurant', restaurant_id=r.restaurant_id) }}">{{ r.name }}</a></td>
+      <td>{{ r.cuisine }}</td>
+      <td>{{ r.similar_users_who_favorited }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No recommendations yet. Add a few favorites that other users share and check back.</p>
+{% endif %}
+{% endblock %}

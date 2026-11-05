@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}{{ r.name }}{% endblock %}
+{% block content %}
+<h1>{{ r.name }}</h1>
+<p>
+  {{ r.cuisine }} &middot; ${{ r.min_price }} to ${{ r.max_price }} &middot; zip {{ r.restaurant_zip }}<br>
+  Open {{ r.open_time }} to {{ r.close_time }} &middot; {{ 'open now' if r.open_now else 'closed now' }}<br>
+  {% if r.avg_rating is not none %}Average rating {{ '%.1f' % r.avg_rating }} from {{ r.num_reviews }} review(s){% else %}No reviews yet{% endif %}
+</p>
+
+{% if user_id %}
+  {% if is_favorite %}
+  <form method="POST" action="{{ url_for('favorites_remove') }}" class="inline">
+    <input type="hidden" name="restaurant_id" value="{{ r.restaurant_id }}">
+    <input type="hidden" name="next" value="{{ url_for('restaurant', restaurant_id=r.restaurant_id) }}">
+    <button type="submit">Remove from favorites</button>
+  </form>
+  {% else %}
+  <form method="POST" action="{{ url_for('favorites_add') }}" class="inline">
+    <input type="hidden" name="restaurant_id" value="{{ r.restaurant_id }}">
+    <input type="hidden" name="next" value="{{ url_for('restaurant', restaurant_id=r.restaurant_id) }}">
+    <button type="submit">Add to favorites</button>
+  </form>
+  {% endif %}
+{% else %}
+<p><a href="{{ url_for('index') }}">Pick a user</a> to book, review or favorite.</p>
+{% endif %}
+
+<h2>Tables</h2>
+{% if tables %}
+<table>
+  <thead><tr><th>Table</th><th>Seats</th><th>Seating</th></tr></thead>
+  <tbody>{% for t in tables %}<tr><td>{{ t.table_no }}</td><td>{{ t.capacity }}</td><td>{{ t.seating_type }}</td></tr>{% endfor %}</tbody>
+</table>
+{% else %}<p>No tables listed.</p>{% endif %}
+
+<h2 id="book">Book a table</h2>
+{% if user_id and tables %}
+<form method="POST" action="{{ url_for('book') }}">
+  <input type="hidden" name="restaurant_id" value="{{ r.restaurant_id }}">
+  <p>
+    <label for="table_no">Table</label>
+    <select id="table_no" name="table_no" required>
+      {% for t in tables %}
+      <option value="{{ t.table_no }}" {% if prefill.table_no == t.table_no|string %}selected{% endif %}>Table {{ t.table_no }} (seats {{ t.capacity }}, {{ t.seating_type }})</option>
+      {% endfor %}
+    </select>
+    <label for="date">Date</label>
+    <input id="date" name="date" type="date" value="{{ prefill.date }}" required>
+    <label for="time">Time</label>
+    <input id="time" name="time" type="time" value="{{ prefill.time }}" required>
+    <label for="party_size">Party size</label>
+    <input id="party_size" name="party_size" type="number" min="1" max="50" value="{{ prefill.party_size }}" required>
+  </p>
+  <p>
+    <label for="special_requests">Special requests</label>
+    <input id="special_requests" name="special_requests" type="text" maxlength="500">
+  </p>
+  <p>
+    <label for="payment_method">Deposit paid with</label>
+    <select id="payment_method" name="payment_method" required>
+      {% for m in payment_methods %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+    </select>
+    <label for="amount">Deposit amount ($)</label>
+    <input id="amount" name="amount" type="number" step="0.01" min="0.01" required>
+    <button type="submit">Book and pay</button>
+  </p>
+</form>
+{% else %}
+<p>Select a user on the <a href="{{ url_for('index') }}">home page</a> to book a table here.</p>
+{% endif %}
+
+<h2>Reviews</h2>
+{% if reviews %}
+  {% for v in reviews %}
+  <p><strong>{{ v.rating }}/5</strong> by {{ v.reviewer_name }} on {{ v.review_date }}<br>{{ v.rating_text }}</p>
+  {% endfor %}
+{% else %}<p>No reviews yet.</p>{% endif %}
+
+{% if user_id %}
+<h3>Write a review</h3>
+<form method="POST" action="{{ url_for('review') }}">
+  <input type="hidden" name="restaurant_id" value="{{ r.restaurant_id }}">
+  <p>
+    <label for="rating">Rating</label>
+    <select id="rating" name="rating" required>
+      {% for n in [5,4,3,2,1] %}<option value="{{ n }}">{{ n }}</option>{% endfor %}
+    </select>
+    <label for="rating_text">Comment</label>
+    <input id="rating_text" name="rating_text" type="text" maxlength="500">
+    <button type="submit">Submit review</button>
+  </p>
+</form>
+{% endif %}
+{% endblock %}
