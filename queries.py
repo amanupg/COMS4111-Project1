@@ -132,7 +132,11 @@ def list_tables(conn, restaurant_id):
     Return: list of dicts with keys table_no, capacity, seating_type, ordered
     by table_no.
     """
-    todo("list_tables")
+    restaurant_tables = conn.execute(text("""SELECT * FROM RestaurantTable T 
+    WHERE T.Restaurant_ID = :given_restaurant_id ORDER BY T.table_no"""), 
+    {"given_restaurant_id": restaurant_id})
+    table_rows = rows_to_dicts(restaurant_tables)
+    return table_rows
 
 
 def list_reviews(conn, restaurant_id):
