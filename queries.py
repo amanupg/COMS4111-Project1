@@ -78,8 +78,8 @@ def get_user(conn, user_id):
 def list_cuisines(conn):
     """Distinct cuisines, for the search dropdown. Return a list of strings,
     sorted. Course idea: SELECT DISTINCT."""
-    
-    todo("list_cuisines")
+    cuisines = conn.execute(text("SELECT DISTINCT Cuisine FROM Restaruant ORDER BY Cuisine"))
+    return [row[0] for row in cuisines]
 
 
 def search_restaurants(conn, cuisine=None, max_price=None, zip_code=None, open_now=False):
