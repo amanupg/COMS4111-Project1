@@ -66,8 +66,10 @@ def get_user(conn, user_id):
 
     Return: dict with keys user_id, name, email, phone, user_zip, or None.
     """
-    todo("get_user")
-
+    user_result = conn.execute(text("SELECT * FROM Users WHERE user_id = :search_user"), 
+                          {"search_user": user_id})
+    rows = rows_to_dicts(result)
+    return rows[0] if rows else None
 
 # ---------------------------------------------------------------------------
 # Finding restaurants  (proposal feature 1)
@@ -76,6 +78,7 @@ def get_user(conn, user_id):
 def list_cuisines(conn):
     """Distinct cuisines, for the search dropdown. Return a list of strings,
     sorted. Course idea: SELECT DISTINCT."""
+    
     todo("list_cuisines")
 
 
