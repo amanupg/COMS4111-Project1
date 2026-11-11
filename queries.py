@@ -1,5 +1,4 @@
 """All database access for the restaurant reservation app lives in this file.
-
 THIS FILE IS FOR YOU AND YOUR TEAMMATE TO WRITE. The web pages (server.py and
 templates/) already call every function below; each one is a stub that raises
 NotImplementedError until you replace it with real SQL. While a stub is
@@ -105,7 +104,16 @@ def search_restaurants(conn, cuisine=None, max_price=None, zip_code=None, open_n
         user-supplied value into the SQL text.
     Course idea: joins, outer joins, aggregation (GROUP BY / AVG / COUNT).
     """
-    todo("search_restaurants")
+    filter_search = conn.execute(text("""SELECT R.Name, AVG(W.rating) AS average_rating, 
+    COUNT(W.rating) AS number_of_reviews
+    FROM Restaurant R
+    LEFT JOIN Writes_and_Receives_Review W ON W.Restaurant_ID = R.Restaurant_ID 
+    WHERE (:cuisine is NULL OR R.Cuisine = :cuisine) AND (:max_price is NULL OR R.maxprice <= :max_price)
+    AND (:zip_code is NULL OR R.zip_code = :zip_code) AND (NOT :open_now OR R.Open_now = 1)
+    GROUP BY R.Restaurant_ID, R.Name, R.Cuisine, R.Min_price, R.Max_price, R.Open_now, R.Restaruant_zip)
+    ORDER BY avg_rating DESC, r.Name ASC"""), 
+    {"cuisine": cuisine, "max_price": max_price, "zip_code": zip_code, "open_now": open_now})
+    return rows_to_dicts(filter_search)
 
 
 def get_restaurant(conn, restaurant_id):
@@ -116,9 +124,10 @@ def get_restaurant(conn, restaurant_id):
     """
     "Writes_and_Receives_Review (Review_ID, User_ID, Restaurant_ID, Review_Date, Rating, Rating_text)"
     restaurant_search = conn.execute(text("""SELECT R.Restaurant_ID, R.name, R.cuisine, R.min_price, R.max_price,
-    R.open_time, R.close_time, R.open_now, R.restaurant_zip, AVG(W.Rating) AS avg_rating, COUNT (W.Rating AS num_reviews)
+    R.open_time, R.close_time, R.open_now, R.restaurant_zip, AVG(W.Rating) AS avg_rating, COUNT(W.Rating) AS num_reviews)
     FROM Restaurant R 
-    JOIN Writes_and_Receives_Review W ON R.RestaurantID = W.RestaurantID WHERE restaurant_id = :search_restaurant
+    JOIN Writes_and_Receives_Review W ON R.RestaurantID = W.RestaurantID 
+    WHERE restaurant_id = :search_restaurant
     GROUP BY R.RestaurantID, R.name, R.cuisine, R.min_price, R.max_price,
     R.open_time, R.close_time, R.open_now, R.restaurant_zip"""),
     {"search_restaurant": restaurant_id})
