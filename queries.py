@@ -56,6 +56,8 @@ def list_users(conn):
     Return: list of dicts with keys user_id, name, user_zip. Order by name.
     Course idea: a basic SELECT with ORDER BY.
     """
+    conn1 = db1.connect()
+    conn1.execute
     todo("list_users")
 
 
