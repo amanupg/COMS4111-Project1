@@ -116,9 +116,9 @@ def get_restaurant(conn, restaurant_id):
     """
     "Writes_and_Receives_Review (Review_ID, User_ID, Restaurant_ID, Review_Date, Rating, Rating_text)"
     restaurant_search = conn.execute(text("""SELECT R.Restaurant_ID, R.name, R.cuisine, R.min_price, R.max_price,
-    R.open_time, R.close_time, R.open_now, R.restaurant_zip, AVG(W.Rating) AS avg_rating, COUNT (W.Rating AS num_reviews) \
-    FROM Restaurant R  \
-    JOIN Writes_and_Receives_Review W ON R.RestaurantID = W.RestaurantID WHERE restaurant_id = :search_restaurant \
+    R.open_time, R.close_time, R.open_now, R.restaurant_zip, AVG(W.Rating) AS avg_rating, COUNT (W.Rating AS num_reviews)
+    FROM Restaurant R 
+    JOIN Writes_and_Receives_Review W ON R.RestaurantID = W.RestaurantID WHERE restaurant_id = :search_restaurant
     GROUP BY R.RestaurantID, R.name, R.cuisine, R.min_price, R.max_price,
     R.open_time, R.close_time, R.open_now, R.restaurant_zip"""),
     {"search_restaurant": restaurant_id})
@@ -180,8 +180,18 @@ def find_available_tables(conn, res_date, res_time, party_size, cuisine=None):
     Course idea: NOT EXISTS subquery (your Part 2 query 2 is the starting
     point), joins, parameters.
     """
-    todo("find_available_tables")
-
+    #Left join used: if table is not occupied in a left outer join, then Table_No is null
+    available_tables = conn.execute(text("""WITH Taken_Tables AS (SELECT R.Restaurant_ID, R.Table_No FROM Reservation R
+     WHERE R.Res_Date = :res_date AND R.Res_Time = :res_time AND R.Status != 'cancelled')
+     SELECT R.Restaurant_ID, R.Name, R.Cuisine, R.Min_price, R.Max_price, T.Table_No, T.Capacity, T.Seating_type
+     FROM Restaurant R
+     JOIN RestaurantTable T ON R.Restaurant_ID = T.Restaurant_ID
+     LEFT JOIN Taken_Tables as TB ON R.Restaurant_ID = TB.Restaurant_ID AND T.Table_No = TB.Table_No
+     WHERE T.Capacity >= :party_size AND R.Open_time <= :res_time AND :res_time < R.Close_time AND (:cuisine is NULL OR R.Cuisine = :cuisine) AND TB.Table_No IS NULL 
+     ORDER BY R.Name, T.Table_No"""),
+     {"party_size": party_size, "cuisine": cuisine, "res_date": res_date, "res_time": res_time})
+    found_available_tables = rows_to_dicts(available_tables)
+    return found_available_tables
 
 # ---------------------------------------------------------------------------
 # Booking and payment  (proposal feature 3)
