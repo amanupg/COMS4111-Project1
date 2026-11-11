@@ -114,7 +114,10 @@ def get_restaurant(conn, restaurant_id):
     Return: dict with keys restaurant_id, name, cuisine, min_price, max_price,
     open_time, close_time, open_now, restaurant_zip, avg_rating, num_reviews.
     """
-    todo("get_restaurant")
+    restaurant_search = conn.execute("SELECT name, avg_rating FROM Restaurant restaurant_id = :search_restaurant"),
+    {"search_user": restaurant_id}
+    restaurant_rows = rows_to_dicts(restaurant_search)
+    return restaurant_rows[0] if restaurant_rows else None
 
 
 def list_tables(conn, restaurant_id):
