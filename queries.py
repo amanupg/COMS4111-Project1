@@ -68,7 +68,7 @@ def get_user(conn, user_id):
     """
     user_result = conn.execute(text("SELECT * FROM Users WHERE user_id = :search_user"), 
                           {"search_user": user_id})
-    rows = rows_to_dicts(result)
+    rows = rows_to_dicts(user_result)
     return rows[0] if rows else None
 
 # ---------------------------------------------------------------------------
