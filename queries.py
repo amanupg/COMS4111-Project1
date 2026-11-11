@@ -114,8 +114,14 @@ def get_restaurant(conn, restaurant_id):
     Return: dict with keys restaurant_id, name, cuisine, min_price, max_price,
     open_time, close_time, open_now, restaurant_zip, avg_rating, num_reviews.
     """
-    restaurant_search = conn.execute("SELECT name, avg_rating FROM Restaurant restaurant_id = :search_restaurant"),
-    {"search_user": restaurant_id}
+    "Writes_and_Receives_Review (Review_ID, User_ID, Restaurant_ID, Review_Date, Rating, Rating_text)"
+    restaurant_search = conn.execute(text("""SELECT R.Restaurant_ID, R.name, R.cuisine, R.min_price, R.max_price,
+    R.open_time, R.close_time, R.open_now, R.restaurant_zip, AVG(W.Rating) AS avg_rating, COUNT (W.Rating AS num_reviews) \
+    FROM Restaurant R  \
+    JOIN Writes_and_Receives_Review W ON R.RestaurantID = W.RestaurantID WHERE restaurant_id = :search_restaurant \
+    GROUP BY R.RestaurantID, R.name, R.cuisine, R.min_price, R.max_price,
+    R.open_time, R.close_time, R.open_now, R.restaurant_zip"""),
+    {"search_restaurant": restaurant_id})
     restaurant_rows = rows_to_dicts(restaurant_search)
     return restaurant_rows[0] if restaurant_rows else None
 
