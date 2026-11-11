@@ -133,7 +133,7 @@ def list_tables(conn, restaurant_id):
     by table_no.
     """
     restaurant_tables = conn.execute(text("""SELECT * FROM RestaurantTable T 
-    WHERE T.Restaurant_ID = :given_restaurant_id ORDER BY T.table_no"""), 
+    WHERE T.Restaurant_ID = :given_restaurant_id ORDER BY T.Table_no"""), 
     {"given_restaurant_id": restaurant_id})
     table_rows = rows_to_dicts(restaurant_tables)
     return table_rows
@@ -145,7 +145,14 @@ def list_reviews(conn, restaurant_id):
     Return: list of dicts with keys reviewer_name, rating, rating_text,
     review_date. Hint: join the review table to Users to show the name.
     """
-    todo("list_reviews")
+    user_reviews = conn.execute(text("""SELECT U.Name AS reviewer_name, R.Rating AS rating, 
+     R.Rating_text, R.Review_Date AS date_added
+     FROM Writes_and_Receives_Review R
+     JOIN User U ON U.User_ID = R.User_ID WHERE R.Restaurant_ID = :reviewed_restaurant_id 
+     ORDER BY R.Review_Date DESC"""), 
+     {"reviewed_restaurant_id": restaurant_id})
+    review_rows = rows_to_dicts(user_reviews)
+    return review_rows
 
 
 # ---------------------------------------------------------------------------
