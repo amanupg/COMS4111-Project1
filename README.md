@@ -11,17 +11,17 @@ A Flask web app on top of the PostgreSQL database from Part 2. Team: Aman Upganl
 
 | Done | Function | Page that uses it | Course idea |
 |---|---|---|---|
-| [ ] | `list_users`, `get_user` | home (pick a user) | SELECT, ORDER BY |
-| [ ] | `list_cuisines` | search, availability | SELECT DISTINCT |
-| [ ] | `search_restaurants` | /restaurants | outer join, GROUP BY, AVG, optional filters with bound params |
-| [ ] | `get_restaurant`, `list_tables`, `list_reviews` | /restaurant/<id> | joins, aggregation, weak entity |
-| [ ] | `find_available_tables` | /availability | NOT EXISTS, overnight opening hours |
-| [ ] | `create_reservation` | /book | transaction, foreign keys, id numbering, unique-index errors |
-| [ ] | `list_reservations` | /reservations | 3-table join, outer join |
-| [ ] | `cancel_reservation` | cancel button | UPDATE with a guarded WHERE |
-| [ ] | `add_review` | review form | constraints, EXISTS check, UNIQUE |
-| [ ] | `list_favorites`, `add_favorite`, `remove_favorite` | /favorites | many-to-many table, INSERT/DELETE |
-| [ ] | `recommend_restaurants` | /recommendations | self-join, NOT EXISTS, GROUP BY (Part 2 query 3) |
+| [x] | `list_users`, `get_user` | home (pick a user) | SELECT, ORDER BY |
+| [x] | `list_cuisines` | search, availability | SELECT DISTINCT |
+| [x] | `search_restaurants` | /restaurants | outer join, GROUP BY, AVG, optional filters with bound params |
+| [x] | `get_restaurant`, `list_tables`, `list_reviews` | /restaurant/<id> | joins, aggregation, weak entity |
+| [x] | `find_available_tables` | /availability | NOT EXISTS, overnight opening hours |
+| [x] | `create_reservation` | /book | transaction, foreign keys, id numbering, unique-index errors |
+| [x] | `list_reservations` | /reservations | 3-table join, outer join |
+| [x] | `cancel_reservation` | cancel button | UPDATE with a guarded WHERE |
+| [x] | `add_review` | review form | constraints, EXISTS check, UNIQUE |
+| [x] | `list_favorites`, `add_favorite`, `remove_favorite` | /favorites | many-to-many table, INSERT/DELETE |
+| [x] | `recommend_restaurants` | /recommendations | self-join, NOT EXISTS, GROUP BY (Part 2 query 3) |
 
 ## Rules (from the assignment)
 * **No ORM.** Write SQL strings wrapped in `text()`.
@@ -44,7 +44,7 @@ scripts/local_db.sh reset          # put the data back after experiments
 Option B, the class database (needs the Cloud SQL Auth Proxy running on your laptop, see the Part 3 handout):
 put your real PostgreSQL username and password in `.env` (port 5454).
 
-Run the tests (they need no database): `python -m unittest discover -s tests -v`
+Run the tests (the page tests need no database; the tests in test_queries_db.py need `scripts/local_db.sh start`): `python -m unittest discover -s tests -v`
 
 ## Files
 * `server.py`: routes and validation (no SQL).

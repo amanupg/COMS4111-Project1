@@ -77,7 +77,7 @@ def get_user(conn, user_id):
 def list_cuisines(conn):
     """Distinct cuisines, for the search dropdown. Return a list of strings,
     sorted. Course idea: SELECT DISTINCT."""
-    cuisines = conn.execute(text("SELECT DISTINCT Cuisine FROM Restaruant ORDER BY Cuisine"))
+    cuisines = conn.execute(text("SELECT DISTINCT Cuisine FROM Restaurant ORDER BY Cuisine"))
     return [row[0] for row in cuisines]
 
 
@@ -104,14 +104,14 @@ def search_restaurants(conn, cuisine=None, max_price=None, zip_code=None, open_n
         user-supplied value into the SQL text.
     Course idea: joins, outer joins, aggregation (GROUP BY / AVG / COUNT).
     """
-    filter_search = conn.execute(text("""SELECT R.Name, AVG(W.rating) AS average_rating, 
-    COUNT(W.rating) AS number_of_reviews
+    filter_search = conn.execute(text("""SELECT R.Restaurant_ID, R.Name, R.Cuisine, R.Min_price, R.Max_price,
+    R.Restaurant_zip, R.Open_now, AVG(W.Rating) AS avg_rating, COUNT(W.Rating) AS num_reviews
     FROM Restaurant R
     LEFT JOIN Writes_and_Receives_Review W ON W.Restaurant_ID = R.Restaurant_ID 
-    WHERE (:cuisine is NULL OR R.Cuisine = :cuisine) AND (:max_price is NULL OR R.maxprice <= :max_price)
-    AND (:zip_code is NULL OR R.zip_code = :zip_code) AND (NOT :open_now OR R.Open_now = 1)
-    GROUP BY R.Restaurant_ID, R.Name, R.Cuisine, R.Min_price, R.Max_price, R.Open_now, R.Restaruant_zip)
-    ORDER BY avg_rating DESC, r.Name ASC"""), 
+    WHERE (:cuisine is NULL OR R.Cuisine = :cuisine) AND (:max_price is NULL OR R.Max_price <= :max_price)
+    AND (:zip_code is NULL OR R.Restaurant_zip = :zip_code) AND (NOT :open_now OR R.Open_now)
+    GROUP BY R.Restaurant_ID, R.Name, R.Cuisine, R.Min_price, R.Max_price, R.Open_now, R.Restaurant_zip
+    ORDER BY avg_rating DESC NULLS LAST, R.Name ASC"""), 
     {"cuisine": cuisine, "max_price": max_price, "zip_code": zip_code, "open_now": open_now})
     return rows_to_dicts(filter_search)
 
@@ -124,11 +124,11 @@ def get_restaurant(conn, restaurant_id):
     """
     "Writes_and_Receives_Review (Review_ID, User_ID, Restaurant_ID, Review_Date, Rating, Rating_text)"
     restaurant_search = conn.execute(text("""SELECT R.Restaurant_ID, R.name, R.cuisine, R.min_price, R.max_price,
-    R.open_time, R.close_time, R.open_now, R.restaurant_zip, AVG(W.Rating) AS avg_rating, COUNT(W.Rating) AS num_reviews)
+    R.open_time, R.close_time, R.open_now, R.restaurant_zip, AVG(W.Rating) AS avg_rating, COUNT(W.Rating) AS num_reviews
     FROM Restaurant R 
-    JOIN Writes_and_Receives_Review W ON R.RestaurantID = W.RestaurantID 
-    WHERE restaurant_id = :search_restaurant
-    GROUP BY R.RestaurantID, R.name, R.cuisine, R.min_price, R.max_price,
+    LEFT JOIN Writes_and_Receives_Review W ON R.Restaurant_ID = W.Restaurant_ID 
+    WHERE R.Restaurant_ID = :search_restaurant
+    GROUP BY R.Restaurant_ID, R.name, R.cuisine, R.min_price, R.max_price,
     R.open_time, R.close_time, R.open_now, R.restaurant_zip"""),
     {"search_restaurant": restaurant_id})
     restaurant_rows = rows_to_dicts(restaurant_search)
@@ -155,9 +155,9 @@ def list_reviews(conn, restaurant_id):
     review_date. Hint: join the review table to Users to show the name.
     """
     user_reviews = conn.execute(text("""SELECT U.Name AS reviewer_name, R.Rating AS rating, 
-     R.Rating_text, R.Review_Date AS date_added
+     R.Rating_text, R.Review_Date AS review_date
      FROM Writes_and_Receives_Review R
-     JOIN User U ON U.User_ID = R.User_ID WHERE R.Restaurant_ID = :reviewed_restaurant_id 
+     JOIN Users U ON U.User_ID = R.User_ID WHERE R.Restaurant_ID = :reviewed_restaurant_id 
      ORDER BY R.Review_Date DESC"""), 
      {"reviewed_restaurant_id": restaurant_id})
     review_rows = rows_to_dicts(user_reviews)
@@ -196,11 +196,35 @@ def find_available_tables(conn, res_date, res_time, party_size, cuisine=None):
      FROM Restaurant R
      JOIN RestaurantTable T ON R.Restaurant_ID = T.Restaurant_ID
      LEFT JOIN Taken_Tables as TB ON R.Restaurant_ID = TB.Restaurant_ID AND T.Table_No = TB.Table_No
-     WHERE T.Capacity >= :party_size AND R.Open_time <= :res_time AND :res_time < R.Close_time AND (:cuisine is NULL OR R.Cuisine = :cuisine) AND TB.Table_No IS NULL 
+     WHERE T.Capacity >= :party_size AND ((R.Open_time <= R.Close_time AND R.Open_time <= :res_time AND :res_time < R.Close_time)
+     OR (R.Open_time > R.Close_time AND (:res_time >= R.Open_time OR :res_time < R.Close_time))) AND (:cuisine is NULL OR R.Cuisine = :cuisine) AND TB.Table_No IS NULL 
      ORDER BY R.Name, T.Table_No"""),
      {"party_size": party_size, "cuisine": cuisine, "res_date": res_date, "res_time": res_time})
     found_available_tables = rows_to_dicts(available_tables)
     return found_available_tables
+
+# ---------------------------------------------------------------------------
+# Small helpers used by the write functions below
+# ---------------------------------------------------------------------------
+
+NYC_NOW = "(NOW() AT TIME ZONE 'America/New_York')"  # Cloud Run and Postgres may run in UTC; restaurants are in NYC
+
+
+def _constraint_name(error):
+    """Name of the database constraint behind an IntegrityError, or None."""
+    return getattr(getattr(error.orig, "diag", None), "constraint_name", None)
+
+
+def _next_id(conn, table, column):
+    """Next free integer id for a table whose primary key is a plain INTEGER.
+
+    MAX+1 is safe here only because two people booking at the same instant would
+    compute the same id and the PRIMARY KEY would reject the second insert
+    (an IntegrityError). The callers catch that and retry with a fresh id.
+    """
+    # table and column are fixed strings from this file, never user input.
+    return conn.execute(text(f"SELECT COALESCE(MAX({column}), 0) + 1 FROM {table}")).scalar_one()
+
 
 # ---------------------------------------------------------------------------
 # Booking and payment  (proposal feature 3)
@@ -216,27 +240,56 @@ def create_reservation(conn, user_id, restaurant_id, table_no, res_date, res_tim
 
     Return: the new reservation_id (int).
 
-    Things you must decide and handle
-      * Your primary keys are plain INTEGER, not auto-numbered. You can either
-        compute the next id yourself (SELECT COALESCE(MAX(...), 0) + 1 ...
-        inside the same transaction) or make a small schema change to
-        GENERATED ALWAYS AS IDENTITY. Think about what goes wrong when two
-        people book at the same moment, and write down your choice for the
-        README.
-      * Insert the Reservation first, then the Payment (Payment has a foreign
-        key to Reservation). Commit once at the end so you never get a
-        reservation without its payment.
-      * New reservations should have status 'booked'.
-      * The table must exist, be big enough (capacity >= party_size) and not
-        already be booked at that date/time. The database will reject a
-        double booking (unique index), which shows up as an IntegrityError:
-        catch it and raise BookingError("That table is already booked ...").
-      * Any rule you cannot express in the schema (party size vs capacity,
-        opening hours) can be checked here with a SELECT before inserting.
-    Course idea: INSERT, foreign keys, constraints doing the enforcement,
-    transactions.
+    Checks the table exists, is big enough and the restaurant is open (these
+    cannot be written as CHECK constraints because they compare two tables),
+    then inserts the Reservation and, in the same transaction, its Payment.
+    The No_Double_Booking unique index is what actually prevents a double
+    booking, even if two people click at the same moment.
     """
-    todo("create_reservation")
+    table = conn.execute(text("""
+        SELECT T.Capacity,
+               ((R.Open_time <= R.Close_time AND :res_time >= R.Open_time AND :res_time < R.Close_time)
+                OR (R.Open_time > R.Close_time AND (:res_time >= R.Open_time OR :res_time < R.Close_time))) AS is_open
+        FROM RestaurantTable T
+        JOIN Restaurant R ON R.Restaurant_ID = T.Restaurant_ID
+        WHERE T.Restaurant_ID = :restaurant_id AND T.Table_No = :table_no"""),
+        {"restaurant_id": restaurant_id, "table_no": table_no, "res_time": res_time}).mappings().first()
+    if table is None:
+        raise BookingError("That table does not exist.")
+    if table["capacity"] < party_size:
+        raise BookingError(f"That table seats {table['capacity']}, but your party has {party_size}.")
+    if not table["is_open"]:
+        raise BookingError("The restaurant is not open at that time.")
+
+    for attempt in range(3):  # retry only if another booking took our id a split second earlier
+        try:
+            reservation_id = _next_id(conn, "Reservation", "Reservation_ID")
+            conn.execute(text("""
+                INSERT INTO Reservation (Reservation_ID, Res_Date, Res_Time, Party_size, Status,
+                                         Special_requests, User_ID, Restaurant_ID, Table_No)
+                VALUES (:rid, :res_date, :res_time, :party_size, 'booked',
+                        :special_requests, :user_id, :restaurant_id, :table_no)"""),
+                {"rid": reservation_id, "res_date": res_date, "res_time": res_time,
+                 "party_size": party_size, "special_requests": special_requests,
+                 "user_id": user_id, "restaurant_id": restaurant_id, "table_no": table_no})
+            payment_id = _next_id(conn, "Payment", "Payment_ID")
+            conn.execute(text("""
+                INSERT INTO Payment (Payment_ID, Amount, Method, Paid_at, Reservation_ID)
+                VALUES (:pid, :amount, :method, """ + NYC_NOW + """, :rid)"""),
+                {"pid": payment_id, "amount": amount, "method": payment_method, "rid": reservation_id})
+            conn.commit()
+            return reservation_id
+        except IntegrityError as error:
+            conn.rollback()
+            name = _constraint_name(error)
+            if name == "no_double_booking":
+                raise BookingError("That table is already booked at that date and time.")
+            if name in ("reservation_pkey", "payment_pkey") and attempt < 2:
+                continue  # someone else just used our id; pick the next one
+            if name == "reservation_user_id_fkey":
+                raise BookingError("That user does not exist.")
+            raise BookingError("The booking could not be saved. Please try again.")
+    raise BookingError("The booking could not be saved. Please try again.")
 
 
 # ---------------------------------------------------------------------------
@@ -244,30 +297,41 @@ def create_reservation(conn, user_id, restaurant_id, table_no, res_date, res_tim
 # ---------------------------------------------------------------------------
 
 def list_reservations(conn, user_id):
-    """All reservations of one user with restaurant and payment details.
-
-    Return: list of dicts with keys reservation_id, restaurant_id,
-    restaurant_name, table_no, res_date, res_time, party_size, status,
-    special_requests, payment_amount, payment_method. Newest date first.
-    Hint: join Reservation, Restaurant and Payment. Use an OUTER join to
-    Payment in case a reservation has none.
-    """
-    todo("list_reservations")
+    """All reservations of one user with restaurant and payment details,
+    newest first. The payment is an outer join in case a reservation has none."""
+    result = conn.execute(text("""
+        SELECT V.Reservation_ID AS reservation_id, V.Restaurant_ID AS restaurant_id,
+               R.Name AS restaurant_name, V.Table_No AS table_no, V.Res_Date AS res_date,
+               V.Res_Time AS res_time, V.Party_size AS party_size, V.Status AS status,
+               V.Special_requests AS special_requests,
+               P.Amount AS payment_amount, P.Method AS payment_method
+        FROM Reservation V
+        JOIN Restaurant R ON R.Restaurant_ID = V.Restaurant_ID
+        LEFT JOIN Payment P ON P.Reservation_ID = V.Reservation_ID
+        WHERE V.User_ID = :user_id
+        ORDER BY V.Res_Date DESC, V.Res_Time DESC, V.Reservation_ID DESC"""),
+        {"user_id": user_id})
+    return rows_to_dicts(result)
 
 
 def cancel_reservation(conn, user_id, reservation_id):
     """Cancel an upcoming reservation that belongs to this user.
 
-    Return: True if a reservation was cancelled, False if nothing matched.
-
-    Rule from your Part 1 constraints: only the user who made the reservation
-    may cancel it, and only before it starts, and only if it is still
-    'booked'. Put all of those conditions in the WHERE clause of one UPDATE
-    (no separate read) and check how many rows it changed (result.rowcount).
-    Remember conn.commit().
-    Course idea: UPDATE with a WHERE clause.
+    Return True if a reservation was cancelled, False if nothing matched.
+    All the rules sit in the WHERE clause of ONE statement, so there is no
+    gap between checking and changing: it must be this user's, still 'booked',
+    and not yet started (compared in New York time).
     """
-    todo("cancel_reservation")
+    result = conn.execute(text("""
+        UPDATE Reservation
+        SET Status = 'cancelled'
+        WHERE Reservation_ID = :reservation_id
+          AND User_ID = :user_id
+          AND Status = 'booked'
+          AND (Res_Date + Res_Time) > """ + NYC_NOW),
+        {"reservation_id": reservation_id, "user_id": user_id})
+    conn.commit()
+    return result.rowcount > 0
 
 
 # ---------------------------------------------------------------------------
@@ -275,22 +339,40 @@ def cancel_reservation(conn, user_id, reservation_id):
 # ---------------------------------------------------------------------------
 
 def add_review(conn, user_id, restaurant_id, rating, rating_text):
-    """Add a review by this user for this restaurant.
+    """Add a review by this user for this restaurant; return the new review_id.
 
-    Arguments: rating is an int 1..5, rating_text a str (may be empty).
-    Return: the new review_id.
-
-    Rules from your Part 1 constraints
-      * At most one review per user per restaurant (your table has a UNIQUE
-        constraint; catch IntegrityError and raise BookingError with a
-        readable message).
-      * A user may review a restaurant only after a COMPLETED reservation
-        there. The schema cannot express that, so check it here (an EXISTS
-        query), and raise BookingError if the user has none.
-      * Use today's date for review_date (CURRENT_DATE).
-      * Same primary-key-numbering decision as create_reservation.
+    Rules: only after a COMPLETED reservation at that restaurant (a rule the
+    schema cannot express, so it is checked here), and at most one review per
+    user per restaurant (the UNIQUE constraint enforces it).
     """
-    todo("add_review")
+    visited = conn.execute(text("""
+        SELECT EXISTS (SELECT 1 FROM Reservation
+                       WHERE User_ID = :user_id AND Restaurant_ID = :restaurant_id
+                         AND Status = 'completed')"""),
+        {"user_id": user_id, "restaurant_id": restaurant_id}).scalar_one()
+    if not visited:
+        raise BookingError("You can review a restaurant only after a completed reservation there.")
+
+    for attempt in range(3):
+        try:
+            review_id = _next_id(conn, "Writes_and_Receives_Review", "Review_ID")
+            conn.execute(text("""
+                INSERT INTO Writes_and_Receives_Review
+                    (Review_ID, User_ID, Restaurant_ID, Review_Date, Rating, Rating_text)
+                VALUES (:review_id, :user_id, :restaurant_id, """ + NYC_NOW + """::date, :rating, :rating_text)"""),
+                {"review_id": review_id, "user_id": user_id, "restaurant_id": restaurant_id,
+                 "rating": rating, "rating_text": rating_text})
+            conn.commit()
+            return review_id
+        except IntegrityError as error:
+            conn.rollback()
+            name = _constraint_name(error)
+            if name == "writes_and_receives_review_user_id_restaurant_id_key":
+                raise BookingError("You have already reviewed this restaurant.")
+            if name == "writes_and_receives_review_pkey" and attempt < 2:
+                continue
+            raise BookingError("The review could not be saved. Please try again.")
+    raise BookingError("The review could not be saved. Please try again.")
 
 
 # ---------------------------------------------------------------------------
@@ -298,24 +380,39 @@ def add_review(conn, user_id, restaurant_id, rating, rating_text):
 # ---------------------------------------------------------------------------
 
 def list_favorites(conn, user_id):
-    """The restaurants this user has favorited.
-
-    Return: list of dicts with keys restaurant_id, name, cuisine,
-    restaurant_zip, date_added. Newest first.
-    """
-    todo("list_favorites")
+    """The restaurants this user has favorited, newest first."""
+    result = conn.execute(text("""
+        SELECT R.Restaurant_ID AS restaurant_id, R.Name AS name, R.Cuisine AS cuisine,
+               R.Restaurant_zip AS restaurant_zip, F.Date_Added AS date_added
+        FROM Favorites F
+        JOIN Restaurant R ON R.Restaurant_ID = F.Restaurant_ID
+        WHERE F.User_ID = :user_id
+        ORDER BY F.Date_Added DESC, R.Name"""),
+        {"user_id": user_id})
+    return rows_to_dicts(result)
 
 
 def add_favorite(conn, user_id, restaurant_id):
-    """Favorite a restaurant. Adding one that is already a favorite must not
-    crash (check first, or use ON CONFLICT DO NOTHING on the primary key).
-    Return None. Remember conn.commit()."""
-    todo("add_favorite")
+    """Favorite a restaurant. Adding one that is already a favorite does
+    nothing (ON CONFLICT on the primary key), so it never crashes."""
+    try:
+        conn.execute(text("""
+            INSERT INTO Favorites (User_ID, Restaurant_ID, Date_Added)
+            VALUES (:user_id, :restaurant_id, """ + NYC_NOW + """::date)
+            ON CONFLICT (User_ID, Restaurant_ID) DO NOTHING"""),
+            {"user_id": user_id, "restaurant_id": restaurant_id})
+        conn.commit()
+    except IntegrityError:
+        conn.rollback()
+        raise BookingError("That restaurant does not exist.")
 
 
 def remove_favorite(conn, user_id, restaurant_id):
-    """Un-favorite a restaurant. Return None. Remember conn.commit()."""
-    todo("remove_favorite")
+    """Un-favorite a restaurant (nothing happens if it was not a favorite)."""
+    conn.execute(text("""
+        DELETE FROM Favorites WHERE User_ID = :user_id AND Restaurant_ID = :restaurant_id"""),
+        {"user_id": user_id, "restaurant_id": restaurant_id})
+    conn.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -325,10 +422,26 @@ def remove_favorite(conn, user_id, restaurant_id):
 def recommend_restaurants(conn, user_id):
     """Restaurants this user might like, based on users with similar taste.
 
-    Return: list of dicts with keys restaurant_id, name, cuisine,
-    similar_users_who_favorited. Most-recommended first, then by name.
-
-    This is your Part 2 query 3 with the hard-coded 1 replaced by a bound
-    parameter (:uid). It uses a self-join on Favorites, NOT EXISTS, GROUP BY.
+    Your Part 2 query 3 with the user id as a bound parameter: other users who
+    share a favorite with this user (fb), and their other favorites (fr),
+    excluding restaurants this user already visited or favorited.
     """
-    todo("recommend_restaurants")
+    result = conn.execute(text("""
+        SELECT r.Restaurant_ID AS restaurant_id, r.Name AS name, r.Cuisine AS cuisine,
+               COUNT(DISTINCT fb.User_ID) AS similar_users_who_favorited
+        FROM Favorites fa
+        JOIN Favorites fb ON fb.Restaurant_ID = fa.Restaurant_ID AND fb.User_ID <> fa.User_ID
+        JOIN Favorites fr ON fr.User_ID = fb.User_ID AND fr.Restaurant_ID <> fa.Restaurant_ID
+        JOIN Restaurant r ON r.Restaurant_ID = fr.Restaurant_ID
+        WHERE fa.User_ID = :user_id
+          AND NOT EXISTS (SELECT 1 FROM Reservation res
+                          WHERE res.User_ID = fa.User_ID
+                            AND res.Restaurant_ID = r.Restaurant_ID
+                            AND res.Status = 'completed')
+          AND NOT EXISTS (SELECT 1 FROM Favorites mine
+                          WHERE mine.User_ID = fa.User_ID
+                            AND mine.Restaurant_ID = r.Restaurant_ID)
+        GROUP BY r.Restaurant_ID, r.Name, r.Cuisine
+        ORDER BY similar_users_who_favorited DESC, r.Name"""),
+        {"user_id": user_id})
+    return rows_to_dicts(result)

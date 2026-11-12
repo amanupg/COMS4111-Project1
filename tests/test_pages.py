@@ -47,12 +47,16 @@ class PageTests(unittest.TestCase):
         self.assertIn(b"Elena Rostova", r.data)
 
     def test_unwritten_function_does_not_crash_home(self):
-        r = self.client.get("/")  # list_users is still a stub
+        p, _ = self.fake("list_users", side_effect=NotImplementedError("queries.list_users has not been written yet"))
+        with p:
+            r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
         self.assertIn(b"Not written yet", r.data)
 
     def test_unwritten_function_gives_501_page_not_traceback(self):
-        r = self.client.get("/restaurant/101")
+        p, _ = self.fake("get_restaurant", side_effect=NotImplementedError("queries.get_restaurant has not been written yet"))
+        with p:
+            r = self.client.get("/restaurant/101")
         self.assertEqual(r.status_code, 501)
         self.assertIn(b"has not been written yet", r.data)
 
