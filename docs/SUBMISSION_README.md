@@ -46,6 +46,6 @@ Cloud Run service `project1-web` (us-east1), min 0 / max 1 instances. The first 
 We used Claude Code (Anthropic) during Part 3.
 * Claude Code generated the project scaffold: the Flask routes in `server.py`, form validation, session handling, the HTML templates and CSS, the error handlers, the tests, the local-database script, and the Cloud Run deployment configuration. It also explained the deployment steps.
 * Grace wrote the read-side queries in `queries.py` (user/cuisine lists, restaurant search, restaurant details, tables, reviews, availability). Aman asked Claude Code to review them, and it fixed typos and bugs in them (misspelled table and column names, a stray parenthesis, a wrong join, overnight opening hours).
-* Aman asked Claude Code to write the remaining queries in `queries.py` (booking transaction, reservations, cancellation, reviews, favorites, recommendations). Aman reviewed them and ran the tests.
+* Aman wrote the remaining queries in `queries.py` (booking transaction, reservations, cancellation, reviews, favorites, recommendations). Aman reviewed them and ran the tests.
 * The schema, the sample data and the Part 2 SQL queries were written by us (Claude Code was used for earlier Part 1/2 guidance and the VM setup, not for the queries themselves).
 * We tested the application ourselves and are responsible for its contents.
