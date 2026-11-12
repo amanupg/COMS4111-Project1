@@ -1,0 +1,50 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: project1-web
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "1"
+        run.googleapis.com/container-dependencies: '{"flask":["proxy"]}'
+    spec:
+      containers:
+      - name: flask
+        image: us-east1-docker.pkg.dev/intro-db-512023/web/project1-web:v1
+        ports:
+        - containerPort: 8080
+        env:
+        - {name: DB_HOST, value: "127.0.0.1"}
+        - {name: DB_PORT, value: "5454"}
+        - {name: DB_NAME, value: proj1part2}
+        - name: DB_USER
+          valueFrom: {secretKeyRef: {name: db-user, key: latest}}
+        - name: DB_PASSWORD
+          valueFrom: {secretKeyRef: {name: db-password, key: latest}}
+      - name: proxy
+        image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.26.3
+        args:
+        - --address=0.0.0.0
+        - --port=5454
+        - --credentials-file=/secrets/cloud-sql-proxy-key
+        - coms4111-db-ta:us-east1:server-4111-fall-2026
+        resources:
+          limits: {cpu: "1", memory: 128Mi}
+        startupProbe:
+          tcpSocket: {port: 5454}
+          initialDelaySeconds: 0
+          periodSeconds: 2
+          failureThreshold: 30
+          timeoutSeconds: 1
+        volumeMounts:
+        - {name: proxy-key, mountPath: /secrets}
+      volumes:
+      - name: proxy-key
+        secret:
+          secretName: cloud-sql-proxy-key
+          items:
+          - {key: latest, path: cloud-sql-proxy-key}
