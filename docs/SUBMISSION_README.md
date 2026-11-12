@@ -3,7 +3,7 @@
 Team: Aman Upganlawar (au2327) and Grace Bokyung Chun (gbc2115)
 
 ## Database account
-PostgreSQL account holding our database on the class server: au2327 (database proj1part2). This is the same database as Part 2 (7 tables: Users, Restaurant, Dining_Table, Reservation, Payment, Review, Favorite).
+PostgreSQL account holding our database on the class server: au2327 (database proj1part2). This is the same database as Part 2 (7 tables: Users, Restaurant, RestaurantTable, Reservation, Payment, Writes_and_Receives_Review, Favorites).
 
 ## Web application URL
 https://project1-web-731893459985.us-east1.run.app
@@ -30,7 +30,7 @@ Cloud Run service `project1-web` (us-east1), min 0 / max 1 instances. The first 
 * `/db-check` endpoint used to verify the Cloud Run to Cloud SQL connection.
 
 ## Two interesting pages
-1. **Availability and booking (`/availability`, then `/book`).** The user gives a date, time, party size and optionally a cuisine. The availability query joins Restaurant and Dining_Table, filters by capacity and opening hours (handling restaurants that close after midnight), and uses `NOT EXISTS` against Reservation to drop tables that are already booked for an overlapping slot. Booking then runs one transaction that inserts the Reservation and its Payment together, so either both exist or neither does. We find it interesting because correctness depends on the database: a unique index (`No_Double_Booking`) is the final guard against two people taking the same table.
+1. **Availability and booking (`/availability`, then `/book`).** The user gives a date, time, party size and optionally a cuisine. The availability query joins Restaurant and RestaurantTable, filters by capacity and opening hours (handling restaurants that close after midnight), and uses `NOT EXISTS` against Reservation to drop tables that are already booked for an overlapping slot. Booking then runs one transaction that inserts the Reservation and its Payment together, so either both exist or neither does. We find it interesting because correctness depends on the database: a unique index (`No_Double_Booking`) is the final guard against two people taking the same table.
 2. **Recommendations (`/recommendations`).** For the current user, it finds other users who booked the same restaurants and suggests restaurants they booked that the current user has not (self-join on Reservation, `NOT EXISTS`, `GROUP BY` with `COUNT` to rank). No input beyond the logged-in user is needed. It is interesting because it turns the booking data into a useful result with one aggregate query, and it is the "interesting query" from Part 2, now parameterized.
 
 ## Design decisions worth mentioning
