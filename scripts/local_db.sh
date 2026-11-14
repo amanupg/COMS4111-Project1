@@ -27,6 +27,7 @@ start() {
 load() {
   psql -h 127.0.0.1 -p $PORT -U dev -d proj1part2 -v ON_ERROR_STOP=1 -q -f db/schema.sql
   psql -h 127.0.0.1 -p $PORT -U dev -d proj1part2 -v ON_ERROR_STOP=1 -q -f db/data.sql
+  psql -h 127.0.0.1 -p $PORT -U dev -d proj1part2 -v ON_ERROR_STOP=1 -q -f db/demo_rows.sql
 }
 case "${1:-}" in
   start) start ;;
