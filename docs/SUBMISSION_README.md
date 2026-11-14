@@ -11,10 +11,10 @@ https://project1-web-731893459985.us-east1.run.app
 Cloud Run service `project1-web` (us-east1), min 0 / max 1 instances. The first request after idle can take a few seconds (cold start). Health check: `/db-check`.
 
 ## What we implemented from the Part 1 proposal
-* Search restaurants with optional filters (cuisine, maximum price, zip code, open now); results show the average review rating (`/restaurants`).
+* Search restaurants with optional filters (name, cuisine, maximum price, a zip code range, open now); results show the average review rating (`/restaurants`).
 * Restaurant page with details, tables and reviews (`/restaurant/<id>`).
-* Availability by date, time and party size: lists tables that fit the party, are open at that time (including hours past midnight) and are not already booked (`/availability`).
-* Booking a table with an advance payment, stored as a Reservation row plus a Payment row (`/book`).
+* Availability by date, time and party size, on the same page as the search: under each restaurant it lists the tables that fit the party, are open at that time (including hours past midnight) and are not already booked or within 10 minutes of another booking. Restaurants have several kinds of table (Booth, Bar, Window Seat, ...).
+* Booking a table with a fixed advance deposit (half of the restaurant's minimum price times the party size), stored as a Reservation row plus a Payment row (`/book`).
 * View and cancel your own reservations; a reservation can only be cancelled while it is still booked and has not started (`/reservations`).
 * Reviews, allowed only for a completed reservation and only once per user per restaurant.
 * Favorites: add, remove and list (`/favorites`).
@@ -30,13 +30,14 @@ Cloud Run service `project1-web` (us-east1), min 0 / max 1 instances. The first 
 * `/db-check` endpoint used to verify the Cloud Run to Cloud SQL connection.
 
 ## Two interesting pages
-1. **Availability and booking (`/availability`, then `/book`).** The user gives a date, time, party size and optionally a cuisine. The availability query joins Restaurant and RestaurantTable, filters by capacity and opening hours (handling restaurants that close after midnight), and uses `NOT EXISTS` against Reservation to drop tables that are already booked for an overlapping slot. Booking then runs one transaction that inserts the Reservation and its Payment together, so either both exist or neither does. We find it interesting because correctness depends on the database: a unique index (`No_Double_Booking`) is the final guard against two people taking the same table.
+1. **Find restaurants with availability, then book (`/restaurants`, then `/book`).** The user filters by name, cuisine, price and zip range and optionally gives a date, time and party size. The availability query joins Restaurant and RestaurantTable, filters by capacity and opening hours (handling restaurants that close after midnight), and uses `NOT EXISTS` against Reservation to drop tables that are already booked for an overlapping slot. Booking then runs one transaction that inserts the Reservation and its Payment together, so either both exist or neither does. We find it interesting because correctness depends on the database: a unique index (`No_Double_Booking`) is the final guard against two people taking the same table.
 2. **Recommendations (`/recommendations`).** For the current user, it finds other users who booked the same restaurants and suggests restaurants they booked that the current user has not (self-join on Reservation, `NOT EXISTS`, `GROUP BY` with `COUNT` to rank). No input beyond the logged-in user is needed. It is interesting because it turns the booking data into a useful result with one aggregate query, and it is the "interesting query" from Part 2, now parameterized.
 
 ## Design decisions worth mentioning
 * **SQL injection:** all SQL is in `queries.py` as `text()` strings with bound parameters (`:name`). User input is never concatenated into SQL. No ORM.
 * **Primary keys:** new ids are `MAX(id)+1` inside the booking transaction; if two requests collide on the primary key, the transaction retries (up to 3 times).
-* **Double booking:** prevented by the `No_Double_Booking` unique index, not only by the application check. The index violation is caught and shown as "that table is already booked".
+* **Double booking:** a table cannot be booked within 10 minutes of another booking (checked in the booking transaction while the table row is locked), and the `No_Double_Booking` unique index is the last guard for the exact same time. Violations are shown as "that table is already booked".
+* **Deposit:** fixed by the database layer, not typed by the user: half of the restaurant's Min_price times the party size.
 * **Cancellation:** a single guarded `UPDATE` (right owner, status booked, not started, compared in New York time), so it is atomic and cannot cancel someone else's reservation.
 * **Reviews:** an `EXISTS` check that the user has a completed reservation at that restaurant, plus a UNIQUE (User_ID, Restaurant_ID) constraint so a user reviews a restaurant once.
 * **Separation:** `server.py` has no SQL; `queries.py` has all SQL.

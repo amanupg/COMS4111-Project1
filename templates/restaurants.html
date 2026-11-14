@@ -3,26 +3,50 @@
 {% block content %}
 <h1>Find restaurants</h1>
 <form method="GET" action="{{ url_for('restaurants') }}">
-  <p>
-    <label for="cuisine">Cuisine</label>
-    <select id="cuisine" name="cuisine">
-      <option value="">Any</option>
-      {% for c in cuisines %}
-      <option value="{{ c }}" {% if c == form.cuisine %}selected{% endif %}>{{ c }}</option>
-      {% endfor %}
-    </select>
-    <label for="max_price">Max price ($)</label>
-    <input id="max_price" name="max_price" type="number" min="0" max="100000" value="{{ form.max_price if form.max_price is not none else '' }}">
-    <label for="zip">Zip code</label>
-    <input id="zip" name="zip" type="number" min="10001" max="11697" value="{{ form.zip if form.zip is not none else '' }}">
-    <label><input type="checkbox" name="open_now" {% if form.open_now %}checked{% endif %}> Open now</label>
-    <button type="submit">Search</button>
-  </p>
+  <fieldset>
+    <legend>Filter</legend>
+    <p>
+      <label for="name">Name</label>
+      <input id="name" name="name" type="text" maxlength="100" value="{{ form.name }}" placeholder="e.g. pizza">
+      <label for="cuisine">Cuisine</label>
+      <select id="cuisine" name="cuisine">
+        <option value="">Any</option>
+        {% for c in cuisines %}
+        <option value="{{ c }}" {% if c == form.cuisine %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+      <label for="max_price">Max price ($)</label>
+      <input id="max_price" name="max_price" type="number" min="0" max="100000" value="{{ form.max_price if form.max_price is not none else '' }}">
+    </p>
+    <p>
+      Zip code from
+      <input id="zip_min" name="zip_min" type="number" min="10001" max="11697" aria-label="Lowest zip code" value="{{ form.zip_min if form.zip_min is not none else '' }}">
+      to
+      <input id="zip_max" name="zip_max" type="number" min="10001" max="11697" aria-label="Highest zip code" value="{{ form.zip_max if form.zip_max is not none else '' }}">
+      <label><input type="checkbox" name="open_now" {% if form.open_now %}checked{% endif %}> Open now</label>
+    </p>
+  </fieldset>
+  <fieldset>
+    <legend>Check availability (optional: fill in all three)</legend>
+    <p>
+      <label for="date">Date</label>
+      <input id="date" name="date" type="date" value="{{ form.date }}">
+      <label for="time">Time</label>
+      <input id="time" name="time" type="time" value="{{ form.time }}">
+      <label for="party_size">Party size</label>
+      <input id="party_size" name="party_size" type="number" min="1" max="50" value="{{ form.party_size }}">
+    </p>
+    <p class="hint">A table is held for {{ buffer_minutes }} minutes around each booking, so a table booked at 12:00 is not free at 12:05.</p>
+  </fieldset>
+  <p><button type="submit">Search</button></p>
 </form>
 
 {% if results %}
 <table>
-  <thead><tr><th>Restaurant</th><th>Cuisine</th><th>Price range</th><th>Zip</th><th>Open now</th><th>Rating</th></tr></thead>
+  <thead>
+    <tr><th>Restaurant</th><th>Cuisine</th><th>Price range</th><th>Zip</th><th>Open now</th><th>Rating</th>
+    {% if check %}<th>Free tables at {{ form.time }} on {{ form.date }} for {{ form.party_size }}</th>{% endif %}</tr>
+  </thead>
   <tbody>
   {% for r in results %}
     <tr>
@@ -32,6 +56,20 @@
       <td>{{ r.restaurant_zip }}</td>
       <td>{{ 'Yes' if r.open_now else 'No' }}</td>
       <td>{% if r.avg_rating is not none %}{{ '%.1f' % r.avg_rating }} ({{ r.num_reviews }}){% else %}no reviews yet{% endif %}</td>
+      {% if check %}
+      <td>
+        {% if r.free_tables %}
+          <ul class="tables">
+          {% for t in r.free_tables %}
+            <li>{{ t.seating_type }}, seats {{ t.capacity }}
+              &middot; <a href="{{ url_for('restaurant', restaurant_id=r.restaurant_id, table_no=t.table_no, date=form.date, time=form.time, party_size=form.party_size) }}#book">Book (deposit ${{ r.deposit }})</a></li>
+          {% endfor %}
+          </ul>
+        {% else %}
+          No table free then
+        {% endif %}
+      </td>
+      {% endif %}
     </tr>
   {% endfor %}
   </tbody>

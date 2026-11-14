@@ -26,6 +26,8 @@ Ground rules (from the Part 3 assignment)
 Relationship to the course: each function says which lecture idea it uses.
 """
 
+from decimal import ROUND_HALF_UP, Decimal
+
 from sqlalchemy import text  # noqa: F401  (you will use this in every function)
 from sqlalchemy.exc import IntegrityError  # noqa: F401  (useful in the write functions)
 
@@ -81,39 +83,32 @@ def list_cuisines(conn):
     return [row[0] for row in cuisines]
 
 
-def search_restaurants(conn, cuisine=None, max_price=None, zip_code=None, open_now=False):
-    """Restaurants matching the filters, each with its average rating.
+def search_restaurants(conn, name=None, cuisine=None, max_price=None,
+                       zip_min=None, zip_max=None, open_now=False):
+    """PLACEHOLDER (changed after our team meeting; the old version is in git history, commit 34adfb2).
 
-    Arguments (any of them may be None / False, meaning "no filter"):
-      cuisine    exact cuisine, e.g. "Italian"
-      max_price  integer; keep restaurants whose Max_price is <= this
-      zip_code   integer NYC zip; keep restaurants in exactly this zip
-      open_now   if True, keep restaurants with Open_now = TRUE
+    Restaurants matching the filters, each with its average rating.
 
-    Return: list of dicts with keys restaurant_id, name, cuisine, min_price,
-    max_price, restaurant_zip, open_now, avg_rating (None if no reviews),
-    num_reviews. Best-rated first, then by name.
+    Arguments (None / False means "no filter"):
+      name      part of the restaurant name, case-insensitive ("pizza" finds "Joe's Pizza")  <- NEW
+      cuisine   exact cuisine, e.g. "Italian"
+      max_price integer; keep restaurants whose Max_price is <= this
+      zip_min   integer; keep restaurants with Restaurant_zip >= this                       <- NEW
+      zip_max   integer; keep restaurants with Restaurant_zip <= this                       <- NEW
+                (either may be None: only a lower or only an upper bound)
+      open_now  if True, keep restaurants with Open_now = TRUE
+
+    Return: list of dicts with keys restaurant_id, name, cuisine, min_price, max_price,
+    restaurant_zip, open_now, avg_rating (None if no reviews), num_reviews.
+    Best-rated first, then by name.
 
     Hints
-      * Average rating needs a join to the review table plus GROUP BY. Use an
-        OUTER join so restaurants with no reviews still appear.
-      * Optional filters WITHOUT string-building: write each condition like
-        (:cuisine IS NULL OR r.Cuisine = :cuisine) and pass None for "no
-        filter". Or build the WHERE clause from a fixed list of condition
-        strings you wrote yourself and bind only the values. Never splice a
-        user-supplied value into the SQL text.
-    Course idea: joins, outer joins, aggregation (GROUP BY / AVG / COUNT).
+      * Name: R.Name ILIKE '%' || :name || '%'  (the % are in the SQL text, the user's text is still bound).
+      * Zip range: (:zip_min IS NULL OR R.Restaurant_zip >= :zip_min) AND (:zip_max IS NULL OR ... <= :zip_max)
+      * Everything else is the same as before: LEFT JOIN to the review table, GROUP BY, AVG.
+    Course idea: joins, outer joins, aggregation, optional filters with bound parameters.
     """
-    filter_search = conn.execute(text("""SELECT R.Restaurant_ID, R.Name, R.Cuisine, R.Min_price, R.Max_price,
-    R.Restaurant_zip, R.Open_now, AVG(W.Rating) AS avg_rating, COUNT(W.Rating) AS num_reviews
-    FROM Restaurant R
-    LEFT JOIN Writes_and_Receives_Review W ON W.Restaurant_ID = R.Restaurant_ID 
-    WHERE (:cuisine is NULL OR R.Cuisine = :cuisine) AND (:max_price is NULL OR R.Max_price <= :max_price)
-    AND (:zip_code is NULL OR R.Restaurant_zip = :zip_code) AND (NOT :open_now OR R.Open_now)
-    GROUP BY R.Restaurant_ID, R.Name, R.Cuisine, R.Min_price, R.Max_price, R.Open_now, R.Restaurant_zip
-    ORDER BY avg_rating DESC NULLS LAST, R.Name ASC"""), 
-    {"cuisine": cuisine, "max_price": max_price, "zip_code": zip_code, "open_now": open_now})
-    return rows_to_dicts(filter_search)
+    todo("search_restaurants")
 
 
 def get_restaurant(conn, restaurant_id):
@@ -168,44 +163,46 @@ def list_reviews(conn, restaurant_id):
 # Availability  (proposal feature 2)
 # ---------------------------------------------------------------------------
 
-def find_available_tables(conn, res_date, res_time, party_size, cuisine=None):
-    """Tables that are free at the requested date and time and big enough.
+def find_available_tables(conn, res_date, res_time, party_size, restaurant_ids=None):
+    """PLACEHOLDER (changed after our team meeting; the old version is in git history, commit 34adfb2).
 
-    Arguments: res_date (datetime.date), res_time (datetime.time),
-    party_size (int), cuisine (optional string, None = any).
+    Tables that are free at the requested date and time and big enough. The Find restaurants page
+    calls this ONCE with the ids of the restaurants it is showing, then displays each restaurant's
+    free tables under it. A restaurant can now have several kinds of table (Booth, Bar, Window Seat...).
 
-    Return: list of dicts with keys restaurant_id, name, cuisine, min_price,
-    max_price, table_no, capacity, seating_type. Order by restaurant name,
-    then table_no.
+    Arguments: res_date (datetime.date), res_time (datetime.time), party_size (int),
+    restaurant_ids (list of ints, or None = all restaurants).                                  <- CHANGED (was cuisine)
 
-    Rules to think about
+    Return: list of dicts with keys restaurant_id, table_no, capacity, seating_type.
+    Order by restaurant_id, then capacity, then table_no.
+
+    Rules
       * Capacity must be at least party_size.
-      * A table is "taken" if a reservation for that same table, date and time
-        exists and its status is not 'cancelled' (this mirrors your
-        No_Double_Booking unique index).
-      * Optional extra: the time should fall inside the restaurant's
-        Open_time..Close_time. Careful: some restaurants close after midnight
-        (Close_time < Open_time), so a simple BETWEEN is wrong for those.
-    Course idea: NOT EXISTS subquery (your Part 2 query 2 is the starting
-    point), joins, parameters.
+      * The restaurant must be open at res_time (some close after midnight: Close_time < Open_time).
+      * NEW 10-MINUTE BUFFER: a table is NOT available if it has a reservation (status not 'cancelled')
+        on the same date whose time is less than BOOKING_BUFFER_MINUTES away from res_time. So with a
+        booking at 12:00, a request for 12:01 is refused and 12:10 is fine. Hint:
+            ABS(EXTRACT(EPOCH FROM (V.Res_Time - :res_time))) < :buffer_seconds
+        and pass BOOKING_BUFFER_MINUTES * 60 as the bound parameter.
+      * restaurant_ids as a list: use  R.Restaurant_ID = ANY(:ids)  with a Python list bound to :ids,
+        and treat None as "no filter" with (:ids IS NULL OR ...)  (you may need CAST(:ids AS INTEGER[])).
+    Course idea: NOT EXISTS subquery (Part 2 query 2), joins, parameters.
     """
-    #Left join used: if table is not occupied in a left outer join, then Table_No is null
-    available_tables = conn.execute(text("""WITH Taken_Tables AS (SELECT R.Restaurant_ID, R.Table_No FROM Reservation R
-     WHERE R.Res_Date = :res_date AND R.Res_Time = :res_time AND R.Status != 'cancelled')
-     SELECT R.Restaurant_ID, R.Name, R.Cuisine, R.Min_price, R.Max_price, T.Table_No, T.Capacity, T.Seating_type
-     FROM Restaurant R
-     JOIN RestaurantTable T ON R.Restaurant_ID = T.Restaurant_ID
-     LEFT JOIN Taken_Tables as TB ON R.Restaurant_ID = TB.Restaurant_ID AND T.Table_No = TB.Table_No
-     WHERE T.Capacity >= :party_size AND ((R.Open_time <= R.Close_time AND R.Open_time <= :res_time AND :res_time < R.Close_time)
-     OR (R.Open_time > R.Close_time AND (:res_time >= R.Open_time OR :res_time < R.Close_time))) AND (:cuisine is NULL OR R.Cuisine = :cuisine) AND TB.Table_No IS NULL 
-     ORDER BY R.Name, T.Table_No"""),
-     {"party_size": party_size, "cuisine": cuisine, "res_date": res_date, "res_time": res_time})
-    found_available_tables = rows_to_dicts(available_tables)
-    return found_available_tables
+    todo("find_available_tables")
+
 
 # ---------------------------------------------------------------------------
 # Small helpers used by the write functions below
 # ---------------------------------------------------------------------------
+
+BOOKING_BUFFER_MINUTES = 10   # two reservations for one table must be at least this far apart
+DEPOSIT_RATE = Decimal("0.5")  # deposit = DEPOSIT_RATE x the restaurant's Min_price x party size
+
+
+def deposit_amount(min_price, party_size):
+    """The fixed deposit: half of the restaurant's minimum price, times the party size, in dollars."""
+    return (Decimal(min_price) * DEPOSIT_RATE * party_size).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
 
 NYC_NOW = "(NOW() AT TIME ZONE 'America/New_York')"  # Cloud Run and Postgres may run in UTC; restaurants are in NYC
 
@@ -231,65 +228,30 @@ def _next_id(conn, table, column):
 # ---------------------------------------------------------------------------
 
 def create_reservation(conn, user_id, restaurant_id, table_no, res_date, res_time,
-                       party_size, special_requests, payment_method, amount):
-    """Book a table AND record its payment, as ONE transaction.
+                       party_size, special_requests, payment_method):
+    """PLACEHOLDER (changed after our team meeting; the old version is in git history, commit 34adfb2).
 
-    Arguments: user_id, restaurant_id, table_no (ints), res_date
-    (datetime.date), res_time (datetime.time), party_size (int),
-    special_requests (str or None), payment_method (str), amount (Decimal).
+    Book a table AND record its deposit payment, as ONE transaction.
+
+    Arguments: user_id, restaurant_id, table_no (ints), res_date (datetime.date), res_time (datetime.time),
+    party_size (int), special_requests (str or None), payment_method (str).
+    There is NO amount argument any more (<- CHANGED): the user no longer types a deposit.
 
     Return: the new reservation_id (int).
 
-    Checks the table exists, is big enough and the restaurant is open (these
-    cannot be written as CHECK constraints because they compare two tables),
-    then inserts the Reservation and, in the same transaction, its Payment.
-    The No_Double_Booking unique index is what actually prevents a double
-    booking, even if two people click at the same moment.
+    Rules
+      * DEPOSIT: read the restaurant's Min_price and insert the Payment with
+        deposit_amount(min_price, party_size) (defined above: half of Min_price x party size).
+      * Keep the old checks: table exists, capacity >= party_size, restaurant open at res_time.
+      * NEW 10-MINUTE BUFFER: refuse (raise BookingError) if the same table has a non-cancelled
+        reservation on the same date less than BOOKING_BUFFER_MINUTES away from res_time.
+        The unique index No_Double_Booking only catches the EXACT same time, so this needs its own check.
+        Two people clicking at once could both pass a plain check, so lock the table row first inside the
+        transaction:  SELECT ... FROM RestaurantTable WHERE Restaurant_ID = :r AND Table_No = :t FOR UPDATE
+        and then run the buffer check.
+      * Insert Reservation then Payment in the same transaction, commit once, retry on a primary-key clash.
     """
-    table = conn.execute(text("""
-        SELECT T.Capacity,
-               ((R.Open_time <= R.Close_time AND :res_time >= R.Open_time AND :res_time < R.Close_time)
-                OR (R.Open_time > R.Close_time AND (:res_time >= R.Open_time OR :res_time < R.Close_time))) AS is_open
-        FROM RestaurantTable T
-        JOIN Restaurant R ON R.Restaurant_ID = T.Restaurant_ID
-        WHERE T.Restaurant_ID = :restaurant_id AND T.Table_No = :table_no"""),
-        {"restaurant_id": restaurant_id, "table_no": table_no, "res_time": res_time}).mappings().first()
-    if table is None:
-        raise BookingError("That table does not exist.")
-    if table["capacity"] < party_size:
-        raise BookingError(f"That table seats {table['capacity']}, but your party has {party_size}.")
-    if not table["is_open"]:
-        raise BookingError("The restaurant is not open at that time.")
-
-    for attempt in range(3):  # retry only if another booking took our id a split second earlier
-        try:
-            reservation_id = _next_id(conn, "Reservation", "Reservation_ID")
-            conn.execute(text("""
-                INSERT INTO Reservation (Reservation_ID, Res_Date, Res_Time, Party_size, Status,
-                                         Special_requests, User_ID, Restaurant_ID, Table_No)
-                VALUES (:rid, :res_date, :res_time, :party_size, 'booked',
-                        :special_requests, :user_id, :restaurant_id, :table_no)"""),
-                {"rid": reservation_id, "res_date": res_date, "res_time": res_time,
-                 "party_size": party_size, "special_requests": special_requests,
-                 "user_id": user_id, "restaurant_id": restaurant_id, "table_no": table_no})
-            payment_id = _next_id(conn, "Payment", "Payment_ID")
-            conn.execute(text("""
-                INSERT INTO Payment (Payment_ID, Amount, Method, Paid_at, Reservation_ID)
-                VALUES (:pid, :amount, :method, """ + NYC_NOW + """, :rid)"""),
-                {"pid": payment_id, "amount": amount, "method": payment_method, "rid": reservation_id})
-            conn.commit()
-            return reservation_id
-        except IntegrityError as error:
-            conn.rollback()
-            name = _constraint_name(error)
-            if name == "no_double_booking":
-                raise BookingError("That table is already booked at that date and time.")
-            if name in ("reservation_pkey", "payment_pkey") and attempt < 2:
-                continue  # someone else just used our id; pick the next one
-            if name == "reservation_user_id_fkey":
-                raise BookingError("That user does not exist.")
-            raise BookingError("The booking could not be saved. Please try again.")
-    raise BookingError("The booking could not be saved. Please try again.")
+    todo("create_reservation")
 
 
 # ---------------------------------------------------------------------------

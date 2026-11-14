@@ -9,7 +9,6 @@ Cloud Run uses the Gunicorn command in Procfile instead of Flask's dev server.
 """
 
 import datetime
-import decimal
 import os
 from functools import lru_cache, wraps
 
@@ -136,16 +135,6 @@ def parse_time(value, label="Time"):
         return datetime.time.fromisoformat((value or "").strip())
     except ValueError:
         raise InputError(f"{label} must be a valid time (HH:MM).")
-
-
-def parse_amount(value, label="Amount"):
-    try:
-        amount = decimal.Decimal((value or "").strip())
-    except decimal.InvalidOperation:
-        raise InputError(f"{label} must be a number such as 45.50.")
-    if not amount.is_finite() or amount <= 0 or amount >= decimal.Decimal("100000000"):
-        raise InputError(f"{label} must be greater than 0 and less than 100,000,000.")
-    return amount.quantize(decimal.Decimal("0.01"))
 
 
 def parse_text(value, label, maximum, required=False):
@@ -291,19 +280,58 @@ def logout():
 
 @app.route("/restaurants")
 def restaurants():
+    """Find restaurants, and (optionally) see which tables are free, on ONE page.
+
+    Date, time and party size are optional, but all three are needed to check availability.
+    """
     conn = require_connection()
+    name = parse_text(request.args.get("name"), "Restaurant name", 100)
     cuisine = parse_text(request.args.get("cuisine"), "Cuisine", 50)
     max_price = parse_int(request.args.get("max_price"), "Maximum price",
                           minimum=0, maximum=100000, required=False)
-    zip_code = parse_int(request.args.get("zip"), "Zip code",
-                         minimum=NYC_ZIP_RANGE[0], maximum=NYC_ZIP_RANGE[1], required=False)
+    zip_min = parse_int(request.args.get("zip_min"), "Lowest zip code",
+                        minimum=NYC_ZIP_RANGE[0], maximum=NYC_ZIP_RANGE[1], required=False)
+    zip_max = parse_int(request.args.get("zip_max"), "Highest zip code",
+                        minimum=NYC_ZIP_RANGE[0], maximum=NYC_ZIP_RANGE[1], required=False)
+    if zip_min is not None and zip_max is not None and zip_min > zip_max:
+        raise InputError("The lowest zip code cannot be higher than the highest zip code.")
     open_now = request.args.get("open_now") == "on"
+
+    # Availability: all three fields or none.
+    raw = {k: (request.args.get(k) or "").strip() for k in ("date", "time", "party_size")}
+    check = any(raw.values())
+    res_date = res_time = party_size = None
+    if check:
+        res_date = parse_date(raw["date"])
+        res_time = parse_time(raw["time"])
+        party_size = parse_int(raw["party_size"], "Party size", minimum=1, maximum=50)
+        if res_date < datetime.date.today():
+            raise InputError("The date cannot be in the past.")
+
     cuisines = optional(lambda: queries.list_cuisines(conn), [])
     results = optional(lambda: queries.search_restaurants(
-        conn, cuisine=cuisine, max_price=max_price, zip_code=zip_code, open_now=open_now), [])
-    return render_template("restaurants.html", results=results, cuisines=cuisines,
-                           form={"cuisine": cuisine or "", "max_price": max_price,
-                                 "zip": zip_code, "open_now": open_now})
+        conn, name=name, cuisine=cuisine, max_price=max_price,
+        zip_min=zip_min, zip_max=zip_max, open_now=open_now), [])
+
+    if check and results:
+        free = optional(lambda: queries.find_available_tables(
+            conn, res_date, res_time, party_size,
+            restaurant_ids=[r["restaurant_id"] for r in results]), None)
+        by_restaurant = {}
+        for t in free or []:
+            by_restaurant.setdefault(t["restaurant_id"], []).append(t)
+        results = [dict(r, free_tables=by_restaurant.get(r["restaurant_id"], []),
+                        deposit=queries.deposit_amount(r["min_price"], party_size)) for r in results]
+        if free is None:           # find_available_tables not written: do not claim "fully booked"
+            check = False
+
+    form = {"name": name or "", "cuisine": cuisine or "", "max_price": max_price,
+            "zip_min": zip_min, "zip_max": zip_max, "open_now": open_now,
+            "date": res_date.isoformat() if res_date else "",
+            "time": res_time.strftime("%H:%M") if res_time else "",
+            "party_size": party_size if party_size is not None else ""}
+    return render_template("restaurants.html", results=results, cuisines=cuisines, form=form,
+                           check=check, buffer_minutes=queries.BOOKING_BUFFER_MINUTES)
 
 
 @app.route("/restaurant/<int:restaurant_id>")
@@ -321,33 +349,13 @@ def restaurant(restaurant_id):
     prefill = {key: request.args.get(key, "") for key in ("table_no", "date", "time", "party_size")}
     return render_template("restaurant.html", r=info, tables=tables, reviews=reviews,
                            is_favorite=is_favorite, prefill=prefill, payment_methods=PAYMENT_METHODS,
+                           deposit_per_person=queries.deposit_amount(info["min_price"], 1),
+                           buffer_minutes=queries.BOOKING_BUFFER_MINUTES,
                            user_id=current_user_id())
 
 
 # ---------------------------------------------------------------------------
-# Feature 2: availability
-# ---------------------------------------------------------------------------
-
-@app.route("/availability")
-def availability():
-    conn = require_connection()
-    cuisines = optional(lambda: queries.list_cuisines(conn), [])
-    submitted = any(request.args.get(k) for k in ("date", "time", "party_size"))
-    results, form = None, {"date": "", "time": "", "party_size": "", "cuisine": ""}
-    if submitted:
-        res_date = parse_date(request.args.get("date"))
-        res_time = parse_time(request.args.get("time"))
-        party_size = parse_int(request.args.get("party_size"), "Party size", minimum=1, maximum=50)
-        cuisine = parse_text(request.args.get("cuisine"), "Cuisine", 50)
-        form = {"date": res_date.isoformat(), "time": res_time.strftime("%H:%M"),
-                "party_size": party_size, "cuisine": cuisine or ""}
-        results = optional(lambda: queries.find_available_tables(
-            conn, res_date, res_time, party_size, cuisine=cuisine), [])
-    return render_template("availability.html", results=results, cuisines=cuisines, form=form)
-
-
-# ---------------------------------------------------------------------------
-# Feature 3: book a table and pay
+# Book a table and pay the (fixed) deposit
 # ---------------------------------------------------------------------------
 
 @app.route("/book", methods=["POST"])
@@ -363,12 +371,11 @@ def book():
     method = f.get("payment_method", "")
     if method not in PAYMENT_METHODS:
         raise InputError("Choose a payment method from the list.")
-    amount = parse_amount(f.get("amount"))
     if res_date < datetime.date.today():
         raise InputError("The reservation date cannot be in the past.")
     reservation_id = queries.create_reservation(
         require_connection(), current_user_id(), restaurant_id, table_no, res_date, res_time,
-        party_size, requests_text, method, amount)
+        party_size, requests_text, method)
     flash(f"Reservation #{reservation_id} booked.", "ok")
     return redirect(url_for("reservations"))
 

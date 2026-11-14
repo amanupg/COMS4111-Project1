@@ -61,9 +61,17 @@
     <select id="payment_method" name="payment_method" required>
       {% for m in payment_methods %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
     </select>
-    <label for="amount">Deposit amount ($)</label>
-    <input id="amount" name="amount" type="number" step="0.01" min="0.01" required>
-    <button type="submit">Book and pay</button>
+    <button type="submit">Book and pay deposit</button>
+  </p>
+  <p class="hint">
+    The deposit is fixed: half of this restaurant's minimum price (${{ r.min_price }}) per person,
+    so ${{ deposit_per_person }} per person
+    {% if prefill.party_size and prefill.party_size.isdigit() %}
+      &mdash; ${{ (deposit_per_person * prefill.party_size|int)|round(2) }} for a party of {{ prefill.party_size }}.
+    {% else %}
+      &mdash; multiplied by your party size.
+    {% endif %}
+    A table cannot be booked within {{ buffer_minutes }} minutes of another booking for the same table.
   </p>
 </form>
 {% else %}

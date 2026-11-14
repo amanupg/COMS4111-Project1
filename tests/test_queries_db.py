@@ -46,6 +46,7 @@ def rebuild_database():
     admin.dispose()
     psql_file(ROOT / "db" / "schema.sql")
     psql_file(ROOT / "db" / "data.sql")
+    psql_file(ROOT / "db" / "extra_tables.sql")
 
 
 class DatabaseTestCase(unittest.TestCase):
@@ -70,10 +71,19 @@ class DatabaseTestCase(unittest.TestCase):
                            "Writes_and_Receives_Review, Restaurant, Users CASCADE"))
         admin.dispose()
         psql_file(ROOT / "db" / "data.sql")
+        psql_file(ROOT / "db" / "extra_tables.sql")
         self.conn = self.engine.connect()
 
     def tearDown(self):
         self.conn.close()
+
+    def _callTestMethod(self, method):
+        # Functions that are still PLACEHOLDERS (raise NotImplementedError) make their tests skip, not fail.
+        # Once you write the function, its tests start running and tell you if it is right.
+        try:
+            method()
+        except NotImplementedError as exc:
+            self.skipTest(f"placeholder not written yet: {exc}")
 
     def scalar(self, sql, **params):
         return self.conn.execute(text(sql), params).scalar_one()
@@ -84,7 +94,7 @@ class WriteSideTests(DatabaseTestCase):
 
     def book(self, **overrides):
         args = dict(user_id=1, restaurant_id=101, table_no=1, res_date=FUTURE, res_time=datetime.time(9, 0),
-                    party_size=2, special_requests="Window", payment_method="Cash", amount=decimal.Decimal("20.00"))
+                    party_size=2, special_requests="Window", payment_method="Cash")
         args.update(overrides)
         return queries.create_reservation(self.conn, **args)
 
@@ -97,7 +107,30 @@ class WriteSideTests(DatabaseTestCase):
         self.assertEqual(tuple(row), ("booked", 1, 1))
         pay = self.conn.execute(text("SELECT amount, method, reservation_id FROM Payment WHERE reservation_id = :r"),
                                 {"r": rid}).one()
-        self.assertEqual((pay.amount, pay.method), (decimal.Decimal("20.00"), "Cash"))
+        self.assertEqual((pay.amount, pay.method), (decimal.Decimal("5.00"), "Cash"))  # 0.5 x $5 x 2 people
+
+    def test_deposit_is_half_the_minimum_price_times_party_size(self):
+        # Soho Pizzeria (107): Min_price 10, table 1 seats 8.
+        rid = self.book(restaurant_id=107, table_no=1, res_time=datetime.time(12, 0), party_size=5)
+        amount = self.scalar("SELECT amount FROM Payment WHERE reservation_id = :r", r=rid)
+        self.assertEqual(amount, decimal.Decimal("25.00"))  # 0.5 x 10 x 5
+
+    def test_buffer_of_ten_minutes_between_bookings_of_one_table(self):
+        self.book(res_time=datetime.time(12, 0))
+        for minute in (0, 1, 5, 9):  # inside the 10-minute buffer after the first booking
+            with self.assertRaises(queries.BookingError, msg=f"12:{minute:02d}"):
+                self.book(user_id=2, res_time=datetime.time(12, minute))
+        with self.assertRaises(queries.BookingError):  # and before it
+            self.book(user_id=2, res_time=datetime.time(11, 55))
+        self.book(user_id=2, res_time=datetime.time(12, 10))  # exactly 10 minutes later is fine
+        self.book(user_id=3, res_time=datetime.time(11, 50))  # exactly 10 minutes earlier is fine
+
+    def test_buffer_only_applies_to_the_same_table_and_day_and_active_bookings(self):
+        rid = self.book(res_time=datetime.time(12, 0))
+        self.book(user_id=2, table_no=2, res_time=datetime.time(12, 1))                  # other table (restaurant 101 has 4)
+        self.book(user_id=3, res_date=FUTURE + datetime.timedelta(days=1), res_time=datetime.time(12, 1))  # other day
+        queries.cancel_reservation(self.conn, 1, rid)
+        self.book(user_id=4, res_time=datetime.time(12, 1))                               # cancelled booking holds nothing
 
     def test_double_booking_is_refused_and_leaves_no_trace(self):
         self.book()
@@ -127,12 +160,6 @@ class WriteSideTests(DatabaseTestCase):
         with self.assertRaises(queries.BookingError):
             self.book(restaurant_id=107, table_no=1, res_time=datetime.time(3, 0), party_size=4)
 
-    def test_failed_payment_rolls_back_the_reservation(self):
-        before = self.scalar("SELECT COUNT(*) FROM Reservation")
-        with self.assertRaises(queries.BookingError):
-            self.book(amount=decimal.Decimal("-5"))  # violates the Payment CHECK (Amount > 0)
-        self.assertEqual(self.scalar("SELECT COUNT(*) FROM Reservation"), before)
-
     def test_unknown_user_is_a_friendly_error(self):
         with self.assertRaises(queries.BookingError):
             self.book(user_id=9999)
@@ -150,7 +177,7 @@ class WriteSideTests(DatabaseTestCase):
         rows = queries.list_reservations(self.conn, 1)
         self.assertEqual(rows[0]["reservation_id"], rid)  # newest date first
         self.assertEqual(rows[0]["restaurant_name"], "Morningside Cafe")
-        self.assertEqual(rows[0]["payment_amount"], decimal.Decimal("20.00"))
+        self.assertEqual(rows[0]["payment_amount"], decimal.Decimal("5.00"))
         self.assertEqual(len(rows), 2)  # the new one plus the sample completed one
         self.assertEqual(queries.list_reservations(self.conn, 9999), [])
 
@@ -238,8 +265,17 @@ class ReadSideTests(DatabaseTestCase):
         self.assertEqual({r["cuisine"] for r in cafes}, {"Cafe"})
         cheap = queries.search_restaurants(self.conn, max_price=20)
         self.assertTrue(all(r["max_price"] <= 20 for r in cheap))
-        self.assertEqual([r["restaurant_zip"] for r in queries.search_restaurants(self.conn, zip_code=10027)],
-                         [10027] * 2)
+        in_range = queries.search_restaurants(self.conn, zip_min=10001, zip_max=10010)
+        self.assertTrue(in_range and all(10001 <= r["restaurant_zip"] <= 10010 for r in in_range))
+        only_low = queries.search_restaurants(self.conn, zip_min=10025)
+        self.assertTrue(only_low and all(r["restaurant_zip"] >= 10025 for r in only_low))
+        only_high = queries.search_restaurants(self.conn, zip_max=10002)
+        self.assertTrue(only_high and all(r["restaurant_zip"] <= 10002 for r in only_high))
+        self.assertEqual([r["name"] for r in queries.search_restaurants(self.conn, name="pizzeria")], ["Soho Pizzeria"])
+        self.assertEqual(len(queries.search_restaurants(self.conn, name="no such place")), 0)
+        # user text is a value, not SQL
+        self.assertEqual(queries.search_restaurants(self.conn, name="x'; DROP TABLE Users; --"), [])
+        self.assertEqual(self.scalar("SELECT COUNT(*) FROM Users"), 25)
         open_now = queries.search_restaurants(self.conn, open_now=True)
         self.assertTrue(open_now and all(r["open_now"] for r in open_now))
 
@@ -257,22 +293,50 @@ class ReadSideTests(DatabaseTestCase):
         self.assertIsNone(r["avg_rating"])
 
     def test_list_tables_and_reviews(self):
-        self.assertEqual([t["table_no"] for t in queries.list_tables(self.conn, 101)], [1])
+        tables = queries.list_tables(self.conn, 101)
+        self.assertGreaterEqual(len(tables), 3)                                    # several kinds of table
+        self.assertGreaterEqual(len({t["seating_type"] for t in tables}), 3)
         reviews = queries.list_reviews(self.conn, 101)
         self.assertEqual({"reviewer_name", "rating", "rating_text", "review_date"}, set(reviews[0]))
 
     def test_find_available_tables(self):
         rows = queries.find_available_tables(self.conn, FUTURE, datetime.time(12, 0), 4)
         self.assertTrue(rows and all(r["capacity"] >= 4 for r in rows))
-        names = [r["name"] for r in rows]
-        self.assertEqual(names, sorted(names))
+        self.assertTrue({"restaurant_id", "table_no", "capacity", "seating_type"} <= set(rows[0]))
+        # A restaurant can offer several kinds of table at once.
+        by_restaurant = {}
+        for r in rows:
+            by_restaurant.setdefault(r["restaurant_id"], set()).add(r["seating_type"])
+        self.assertTrue(any(len(types) >= 2 for types in by_restaurant.values()))
         # Taken tables disappear: book one, and it must vanish from the list.
         first = rows[0]
         queries.create_reservation(self.conn, 1, first["restaurant_id"], first["table_no"], FUTURE,
-                                   datetime.time(12, 0), 4, None, "Cash", decimal.Decimal("10"))
+                                   datetime.time(12, 0), 4, None, "Cash")
         again = queries.find_available_tables(self.conn, FUTURE, datetime.time(12, 0), 4)
         self.assertNotIn((first["restaurant_id"], first["table_no"]),
                          [(r["restaurant_id"], r["table_no"]) for r in again])
+
+    def test_find_available_tables_only_for_the_restaurants_asked_about(self):
+        rows = queries.find_available_tables(self.conn, FUTURE, datetime.time(12, 0), 2, restaurant_ids=[103, 104])
+        self.assertTrue(rows and {r["restaurant_id"] for r in rows} <= {103, 104})
+        self.assertEqual(queries.find_available_tables(self.conn, FUTURE, datetime.time(12, 0), 2, restaurant_ids=[]), [])
+
+    def test_find_available_tables_respects_the_ten_minute_buffer(self):
+        queries.create_reservation(self.conn, 1, 103, 1, FUTURE, datetime.time(12, 0), 4, None, "Cash")
+        def table1_free_at(hour, minute):
+            rows = queries.find_available_tables(self.conn, FUTURE, datetime.time(hour, minute), 4, restaurant_ids=[103])
+            return any(r["table_no"] == 1 for r in rows)
+        self.assertFalse(table1_free_at(12, 1))
+        self.assertFalse(table1_free_at(12, 9))
+        self.assertFalse(table1_free_at(11, 55))
+        self.assertTrue(table1_free_at(12, 10))
+        self.assertTrue(table1_free_at(11, 50))
+
+    def test_find_available_tables_overnight_and_closed_hours(self):
+        late = queries.find_available_tables(self.conn, FUTURE, datetime.time(0, 30), 4, restaurant_ids=[107])
+        self.assertTrue(late)                       # Soho Pizzeria is open until 01:00
+        closed = queries.find_available_tables(self.conn, FUTURE, datetime.time(3, 0), 4, restaurant_ids=[107])
+        self.assertEqual(closed, [])
 
 
 if __name__ == "__main__":

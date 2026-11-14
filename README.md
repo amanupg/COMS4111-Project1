@@ -13,15 +13,23 @@ A Flask web app on top of the PostgreSQL database from Part 2. Team: Aman Upganl
 |---|---|---|---|
 | [x] | `list_users`, `get_user` | home (pick a user) | SELECT, ORDER BY |
 | [x] | `list_cuisines` | search, availability | SELECT DISTINCT |
-| [x] | `search_restaurants` | /restaurants | outer join, GROUP BY, AVG, optional filters with bound params |
+| [ ] | `search_restaurants` | /restaurants | outer join, GROUP BY, AVG, optional filters with bound params. **Placeholder:** add name search and a zip code range |
 | [x] | `get_restaurant`, `list_tables`, `list_reviews` | /restaurant/<id> | joins, aggregation, weak entity |
-| [x] | `find_available_tables` | /availability | NOT EXISTS, overnight opening hours |
-| [x] | `create_reservation` | /book | transaction, foreign keys, id numbering, unique-index errors |
+| [ ] | `find_available_tables` | /restaurants (availability is on the same page now) | NOT EXISTS, overnight opening hours. **Placeholder:** takes restaurant ids; 10-minute buffer around bookings |
+| [ ] | `create_reservation` | /book | transaction, foreign keys, id numbering, unique-index errors. **Placeholder:** no amount argument (deposit = half of Min_price x party size); 10-minute buffer |
 | [x] | `list_reservations` | /reservations | 3-table join, outer join |
 | [x] | `cancel_reservation` | cancel button | UPDATE with a guarded WHERE |
 | [x] | `add_review` | review form | constraints, EXISTS check, UNIQUE |
 | [x] | `list_favorites`, `add_favorite`, `remove_favorite` | /favorites | many-to-many table, INSERT/DELETE |
 | [x] | `recommend_restaurants` | /recommendations | self-join, NOT EXISTS, GROUP BY (Part 2 query 3) |
+
+## Changes decided after the team meeting (Nov 13)
+* **Fixed deposit:** half of the restaurant's minimum price times the party size. Nobody types an amount any more (`queries.deposit_amount` does the arithmetic; `create_reservation` must use it).
+* **Several kinds of table per restaurant:** `db/extra_tables.sql` gives every restaurant 3 to 5 tables of different seating types. Load it on any database that has restaurants (`scripts/local_db.sh` does this for the local one).
+* **10-minute buffer:** two reservations for one table must be at least 10 minutes apart (`queries.BOOKING_BUFFER_MINUTES`).
+* **One page for finding and availability:** the "Check availability" page is gone. `/restaurants` has name, cuisine, price, zip range, open now, plus date, time and party size. When those three are filled in, each restaurant shows its free tables with a Book link.
+* **Zip code is a range** (`zip_min`, `zip_max`, either may be empty).
+* The three placeholders above currently raise `NotImplementedError`, so those pages show a friendly "not written yet" message. Their tests in `tests/test_queries_db.py` are skipped until you write the function, then they run and tell you if it is right.
 
 ## Rules (from the assignment)
 * **No ORM.** Write SQL strings wrapped in `text()`.
