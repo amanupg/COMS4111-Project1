@@ -182,12 +182,7 @@ def find_available_tables(conn, res_date, res_time, party_size, restaurant_ids=N
       * The restaurant must be open at res_time (some close after midnight: Close_time < Open_time).
       * NEW 10-MINUTE BUFFER: a table is NOT available if it has a reservation (status not 'cancelled')
         on the same date whose time is less than BOOKING_BUFFER_MINUTES away from res_time. So with a
-        booking at 12:00, a request for 12:01 is refused and 12:10 is fine. Hint:
-            ABS(EXTRACT(EPOCH FROM (V.Res_Time - :res_time))) < :buffer_seconds
-        and pass BOOKING_BUFFER_MINUTES * 60 as the bound parameter.
-      * restaurant_ids as a list: use  R.Restaurant_ID = ANY(:ids)  with a Python list bound to :ids,
-        and treat None as "no filter" with (:ids IS NULL OR ...)  (you may need CAST(:ids AS INTEGER[])).
-    Course idea: NOT EXISTS subquery (Part 2 query 2), joins, parameters.
+        booking at 12:00, a request for 12:01 is refused and 12:10 is fine.
     """
     buffer_time_seconds = BOOKING_BUFFER_MINUTES * 60 #10 minutes buffer time 
     available_tables = conn.execute(text("""WITH Taken_Tables AS (SELECT R.Restaurant_ID, R.Table_No FROM Reservation R
@@ -203,7 +198,6 @@ def find_available_tables(conn, res_date, res_time, party_size, restaurant_ids=N
      {"restaurant_ids": tuple(restaurant_ids) if restaurant_ids else None, "party_size": party_size, "cuisine": cuisine, "res_date": res_date, "res_time": res_time})
     found_available_tables = rows_to_dicts(available_tables)
     return found_available_tables
-    todo("find_available_tables")
 
 
 # ---------------------------------------------------------------------------
@@ -244,9 +238,7 @@ def _next_id(conn, table, column):
 
 def create_reservation(conn, user_id, restaurant_id, table_no, res_date, res_time,
                        party_size, special_requests, payment_method):
-    """PLACEHOLDER (changed after our team meeting; the old version is in git history, commit 34adfb2).
-
-    Book a table AND record its deposit payment, as ONE transaction.
+    """Book a table AND record its deposit payment, as ONE transaction.
 
     Arguments: user_id, restaurant_id, table_no (ints), res_date (datetime.date), res_time (datetime.time),
     party_size (int), special_requests (str or None), payment_method (str).
@@ -266,8 +258,60 @@ def create_reservation(conn, user_id, restaurant_id, table_no, res_date, res_tim
         and then run the buffer check.
       * Insert Reservation then Payment in the same transaction, commit once, retry on a primary-key clash.
     """
-    todo("create_reservation")
+    table = conn.execute(text(""" SELECT T.Capacity, R.Min_price,
+    ((R.Open_time <= R.Close_time AND :res_time >= R.Open_time AND :res_time < R.Close_time)
+    OR (R.Open_time > R.Close_time AND (:res_time >= R.Open_time OR :res_time < R.Close_time))) AS is_open
+    FROM RestaurantTable T
+    JOIN Restaurant R ON R.Restaurant_ID = T.Restaurant_ID
+    WHERE T.Restaurant_ID = :restaurant_id AND T.Table_No = :table_no
+    FOR UPDATE"""), {"restaurant_id": restaurant_id, "table_no": table_no, "res_time": res_time}).mappings().first()
+    
+    if table is None:
+      raise BookingError("That table does not exist.")
+    if table["capacity"] < party_size:
+      raise BookingError(f"That table seats {table['capacity']}, but your party has {party_size}.")
+    if not table["is_open"]:
+      raise BookingError("The restaurant is not open at that time.")
 
+    buffer_time = 60 * BOOKING_BUFFER_MINUTES
+    time_conflict = conn.execute(text("""SELECT 1 FROM RESERVATION WHERE Restaurant_ID = :restaurant_id
+    AND table_no = :table_no AND Res_date = :res_date AND Status != cancelled AND 
+    ABS(EXTRACT(EPOCH FROM(R.Res_Time - :res_time))) < :buffer_time"""), 
+    {"restaurant_id": restaurant_id, "table_no": table_no, "res_date": res_date, "res_time": res_time, "buffer_time": buffer_time}).first()
+
+    if time_conflict: 
+      raise BookingError("The table is not available at this time.")
+
+    deposited_money = deposit_amount(table["min_price"], party_size)
+    for attempt in range(3):  # retry only if another booking took our id a split second earlier
+      try:
+        reservation_id = _next_id(conn, "Reservation", "Reservation_ID")
+        conn.execute(text("""INSERT INTO Reservation (Reservation_ID, Res_Date, Res_Time, Party_size, Status,
+        Special_requests, User_ID, Restaurant_ID, Table_No)
+        VALUES (:rid, :res_date, :res_time, :party_size, 'booked',
+        :special_requests, :user_id, :restaurant_id, :table_no)"""),
+        {"rid": reservation_id, "res_date": res_date, "res_time": res_time,
+        "party_size": party_size, "special_requests": special_requests,
+        "user_id": user_id, "restaurant_id": restaurant_id, "table_no": table_no})
+
+        payment_id = _next_id(conn, "Payment", "Payment_ID")
+        conn.execute(text("""INSERT INTO Payment (Payment_ID, Amount, Method, Paid_at, Reservation_ID)
+        VALUES (:pid, :amount, :method, """ + NYC_NOW + """, :rid)"""),
+        {"pid": payment_id, "amount": amount, "method": payment_method, "rid": reservation_id})
+        conn.commit()
+        return reservation_id
+
+      except IntegrityError as error:
+        conn.rollback()
+        name = _constraint_name(error)
+        if name == "no_double_booking":
+          raise BookingError("That table is already booked at that date and time.")
+        if name in ("reservation_pkey", "payment_pkey") and attempt < 2:
+          continue  # someone else just used our id; pick the next one
+        if name == "reservation_user_id_fkey":
+          raise BookingError("That user does not exist.")
+        raise BookingError("The booking could not be saved. Please try again.")
+    raise BookingError("The booking could not be saved. Please try again.")
 
 # ---------------------------------------------------------------------------
 # A user's reservations  (proposal overview: view and cancel)
