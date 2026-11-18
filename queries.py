@@ -83,8 +83,7 @@ def list_cuisines(conn):
     return [row[0] for row in cuisines]
 
 
-def search_restaurants(conn, name=None, cuisine=None, max_price=None,
-                       zip_min=None, zip_max=None, open_now=False):
+def search_restaurants(conn, name=None, cuisine=None, max_price=None, zip_min=None, zip_max=None, open_now=False):
     """PLACEHOLDER (changed after our team meeting; the old version is in git history, commit 34adfb2).
 
     Restaurants matching the filters, each with its average rating.
@@ -100,15 +99,19 @@ def search_restaurants(conn, name=None, cuisine=None, max_price=None,
 
     Return: list of dicts with keys restaurant_id, name, cuisine, min_price, max_price,
     restaurant_zip, open_now, avg_rating (None if no reviews), num_reviews.
-    Best-rated first, then by name.
-
-    Hints
-      * Name: R.Name ILIKE '%' || :name || '%'  (the % are in the SQL text, the user's text is still bound).
-      * Zip range: (:zip_min IS NULL OR R.Restaurant_zip >= :zip_min) AND (:zip_max IS NULL OR ... <= :zip_max)
-      * Everything else is the same as before: LEFT JOIN to the review table, GROUP BY, AVG.
-    Course idea: joins, outer joins, aggregation, optional filters with bound parameters.
-    """
-    todo("search_restaurants")
+    Best-rated first, then by name. """
+    
+    filter_search = conn.execute(text("""SELECT R.Restaurant_ID, R.Name, R.Cuisine, R.Min_price, R.Max_price,
+      R.Restaurant_zip, R.Open_now, AVG(W.Rating) AS avg_rating, COUNT(W.Rating) AS num_reviews
+      FROM Restaurant R
+      LEFT JOIN Writes_and_Receives_Review W ON W.Restaurant_ID = R.Restaurant_ID 
+      WHERE (:name is NULL OR R.Name ILIKE '%' || :name || '%') AND ():cuisine is NULL OR R.Cuisine = :cuisine)
+      AND (:max_price is NULL OR R.Max_price <= :max_price) AND (:zip_min is NULL OR R.Restaurant_zip >= :zip_min) 
+      AND (:zip_max is NULL OR R.Restaurant_zip <= :zip_max) AND (NOT :open_now OR R.Open_now = 1)
+      GROUP BY R.Restaurant_ID, R.Name, R.Cuisine, R.Min_price, R.Max_price, R.Open_now, R.Restaurant_zip
+      ORDER BY avg_rating DESC NULLS LAST, R.Name ASC"""), 
+      {"cuisine": cuisine, "max_price": max_price, "zip_min": zip_min, "zip_max": zip_max, "open_now": open_now})
+    return rows_to_dicts(filter_search)
 
 
 def get_restaurant(conn, restaurant_id):
