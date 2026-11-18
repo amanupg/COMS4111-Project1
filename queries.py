@@ -105,12 +105,12 @@ def search_restaurants(conn, name=None, cuisine=None, max_price=None, zip_min=No
       R.Restaurant_zip, R.Open_now, AVG(W.Rating) AS avg_rating, COUNT(W.Rating) AS num_reviews
       FROM Restaurant R
       LEFT JOIN Writes_and_Receives_Review W ON W.Restaurant_ID = R.Restaurant_ID 
-      WHERE (:name is NULL OR R.Name ILIKE '%' || :name || '%') AND ():cuisine is NULL OR R.Cuisine = :cuisine)
+      WHERE (:name is NULL OR R.Name ILIKE '%' || :name || '%') AND (:cuisine is NULL OR R.Cuisine = :cuisine)
       AND (:max_price is NULL OR R.Max_price <= :max_price) AND (:zip_min is NULL OR R.Restaurant_zip >= :zip_min) 
-      AND (:zip_max is NULL OR R.Restaurant_zip <= :zip_max) AND (NOT :open_now OR R.Open_now = 1)
+      AND (:zip_max is NULL OR R.Restaurant_zip <= :zip_max) AND (NOT :open_now OR R.Open_now)
       GROUP BY R.Restaurant_ID, R.Name, R.Cuisine, R.Min_price, R.Max_price, R.Open_now, R.Restaurant_zip
       ORDER BY avg_rating DESC NULLS LAST, R.Name ASC"""), 
-      {"cuisine": cuisine, "max_price": max_price, "zip_min": zip_min, "zip_max": zip_max, "open_now": open_now})
+      {"name": name, "cuisine": cuisine, "max_price": max_price, "zip_min": zip_min, "zip_max": zip_max, "open_now": open_now})
     return rows_to_dicts(filter_search)
 
 
@@ -187,15 +187,16 @@ def find_available_tables(conn, res_date, res_time, party_size, restaurant_ids=N
     buffer_time_seconds = BOOKING_BUFFER_MINUTES * 60 #10 minutes buffer time 
     available_tables = conn.execute(text("""WITH Taken_Tables AS (SELECT R.Restaurant_ID, R.Table_No FROM Reservation R
      WHERE R.Res_Date = :res_date AND R.Status != 'cancelled' AND ABS(EXTRACT(EPOCH FROM(R.Res_Time - :res_time))) < :buffer_time)
-     SELECT R.Restaurant_ID, R.Name as restaurant_name, T.Table_No, T.Capacity, T.Seating_type
+     SELECT R.Restaurant_ID, T.Table_No, T.Capacity, T.Seating_type
      FROM Restaurant R
      JOIN RestaurantTable T ON R.Restaurant_ID = T.Restaurant_ID
      LEFT JOIN Taken_Tables as TB ON R.Restaurant_ID = TB.Restaurant_ID AND T.Table_No = TB.Table_No
      WHERE T.Capacity >= :party_size AND ((R.Open_time <= R.Close_time AND R.Open_time <= :res_time AND :res_time < R.Close_time)
      OR (R.Open_time > R.Close_time AND (:res_time >= R.Open_time OR :res_time < R.Close_time))) 
-     AND (:restaurant_ids is NULL OR R.Restaurant_ID IN :restaurant_ids) AND TB.Table_No IS NULL 
-     ORDER BY R.Name, T.Capacity, T.Table_No"""),
-     {"restaurant_ids": tuple(restaurant_ids) if restaurant_ids else None, "party_size": party_size, "cuisine": cuisine, "res_date": res_date, "res_time": res_time})
+     AND (CAST(:restaurant_ids AS INTEGER[]) IS NULL OR R.Restaurant_ID = ANY(CAST(:restaurant_ids AS INTEGER[]))) AND TB.Table_No IS NULL 
+     ORDER BY R.Restaurant_ID, T.Capacity, T.Table_No"""),
+     {"restaurant_ids": restaurant_ids, "party_size": party_size, "buffer_time": buffer_time_seconds,
+      "res_date": res_date, "res_time": res_time})
     found_available_tables = rows_to_dicts(available_tables)
     return found_available_tables
 
@@ -264,7 +265,7 @@ def create_reservation(conn, user_id, restaurant_id, table_no, res_date, res_tim
     FROM RestaurantTable T
     JOIN Restaurant R ON R.Restaurant_ID = T.Restaurant_ID
     WHERE T.Restaurant_ID = :restaurant_id AND T.Table_No = :table_no
-    FOR UPDATE"""), {"restaurant_id": restaurant_id, "table_no": table_no, "res_time": res_time}).mappings().first()
+    FOR UPDATE OF T"""), {"restaurant_id": restaurant_id, "table_no": table_no, "res_time": res_time}).mappings().first()
     
     if table is None:
       raise BookingError("That table does not exist.")
@@ -275,12 +276,12 @@ def create_reservation(conn, user_id, restaurant_id, table_no, res_date, res_tim
 
     buffer_time = 60 * BOOKING_BUFFER_MINUTES
     time_conflict = conn.execute(text("""SELECT 1 FROM RESERVATION WHERE Restaurant_ID = :restaurant_id
-    AND table_no = :table_no AND Res_date = :res_date AND Status != cancelled AND 
-    ABS(EXTRACT(EPOCH FROM(R.Res_Time - :res_time))) < :buffer_time"""), 
+    AND table_no = :table_no AND Res_date = :res_date AND Status != 'cancelled' AND 
+    ABS(EXTRACT(EPOCH FROM(Res_Time - :res_time))) < :buffer_time"""), 
     {"restaurant_id": restaurant_id, "table_no": table_no, "res_date": res_date, "res_time": res_time, "buffer_time": buffer_time}).first()
 
     if time_conflict: 
-      raise BookingError("The table is not available at this time.")
+      raise BookingError(f"That table is already booked within {BOOKING_BUFFER_MINUTES} minutes of that time.")
 
     deposited_money = deposit_amount(table["min_price"], party_size)
     for attempt in range(3):  # retry only if another booking took our id a split second earlier
@@ -297,7 +298,7 @@ def create_reservation(conn, user_id, restaurant_id, table_no, res_date, res_tim
         payment_id = _next_id(conn, "Payment", "Payment_ID")
         conn.execute(text("""INSERT INTO Payment (Payment_ID, Amount, Method, Paid_at, Reservation_ID)
         VALUES (:pid, :amount, :method, """ + NYC_NOW + """, :rid)"""),
-        {"pid": payment_id, "amount": amount, "method": payment_method, "rid": reservation_id})
+        {"pid": payment_id, "amount": deposited_money, "method": payment_method, "rid": reservation_id})
         conn.commit()
         return reservation_id
 

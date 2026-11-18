@@ -108,7 +108,7 @@ INSERT INTO Restaurant (Restaurant_ID, Name, Min_price, Max_price, Open_time, Cl
 ON CONFLICT (Restaurant_ID) DO NOTHING;
 
 INSERT INTO RestaurantTable (Restaurant_ID, Table_No, Capacity, Seating_type) VALUES
-(101, 1, 2, 'Cafe Table') (101, 2, 2, 'Large Booth'), (101, 3, 4, 'Bar'), (101, 4, 6, 'Outdoor'),
+(101, 1, 2, 'Cafe Table'), (101, 2, 2, 'Large Booth'), (101, 3, 4, 'Bar'), (101, 4, 6, 'Outdoor'),
 (102, 1, 4, 'Booth'), (102, 2, 2, 'Standard Table'), (102, 3, 4, 'Window Seat'), (102, 4, 6, 'High Top'),
 (103, 1, 6, 'Standard Table'), (103, 2, 2, 'Cafe Table'), (103, 3, 4, 'Booth'), (103, 4, 6, 'Round Table'),
 (104, 1, 4, 'Standard Table'), (104, 2, 2, 'Bar'), (104, 3, 4, 'Outdoor'), (104, 4, 6, 'Counter'), (104, 5, 10, 'Private Room'),
@@ -132,7 +132,7 @@ INSERT INTO RestaurantTable (Restaurant_ID, Table_No, Capacity, Seating_type) VA
 (122, 1, 2, 'Cafe Table'), (122, 2, 2, 'Lounge'), (122, 3, 4, 'Cafe Table'), (122, 4, 6, 'Booth'),
 (123, 1, 4, 'Standard Table'), (123, 2, 2, 'Large Booth'), (123, 3, 4, 'Bar'), (123, 4, 6, 'Outdoor'),
 (124, 1, 2, 'Window Seat'), (124, 2, 2, 'Standard Table'), (124, 3, 4, 'Window Seat'), (124, 4, 6, 'High Top'), (124, 5, 10, 'Private Room'),
-(125, 1, 6, 'Standard Table'), (125, 2, 2, 'Cafe Table'), (125, 3, 4, 'Booth'), (125, 4, 6, 'Round Table')
+(125, 1, 6, 'Standard Table'), (125, 2, 2, 'Cafe Table'), (125, 3, 4, 'Booth'), (125, 4, 6, 'Round Table'),
 (126, 1, 4, 'Booth'), (126, 2, 2, 'Bar'), (126, 3, 6, 'Standard Table'), (126, 4, 8, 'Large Booth'),
 (127, 1, 2, 'Window Seat'), (127, 2, 4, 'Standard Table'), (127, 3, 6, 'Outdoor'), (127, 4, 10, 'Private Room'),
 (128, 1, 2, 'Counter'), (128, 2, 4, 'Round Table'), (128, 3, 6, 'Standard Table'),
@@ -148,7 +148,7 @@ INSERT INTO RestaurantTable (Restaurant_ID, Table_No, Capacity, Seating_type) VA
 (138, 1, 2, 'Window Seat'), (138, 2, 4, 'Lounge'), (138, 3, 6, 'Outdoor'),
 (139, 1, 4, 'High Top'), (139, 2, 2, 'Bar'), (139, 3, 6, 'Booth'),
 (140, 1, 4, 'Booth'), (140, 2, 4, 'Standard Table'), (140, 3, 8, 'Large Booth'), (140, 4, 10, 'Private Room'),
-(141, 1, 2, 'Sushi Bar'), (141, 2, 4, 'Table'), (141, 3, 6, 'Private Room'),
+(141, 1, 2, 'Sushi Bar'), (141, 2, 4, 'Standard Table'), (141, 3, 6, 'Private Room'),
 (142, 1, 4, 'Standard Table'), (142, 2, 6, 'Booth'), (142, 3, 2, 'Bar'),
 (143, 1, 4, 'Standard Table'), (143, 2, 2, 'Window Seat'), (143, 3, 6, 'Large Booth'),
 (144, 1, 4, 'Booth'), (144, 2, 2, 'Counter'), (144, 3, 6, 'Standard Table'),
@@ -430,8 +430,8 @@ INSERT INTO Favorites (User_ID, Restaurant_ID, Date_Added) VALUES
 (44, 144, '2026-10-19'), (45, 145, '2026-10-20'), (46, 146, '2026-10-21'),
 (47, 147, '2026-10-22'), (48, 148, '2026-10-23'), (49, 149, '2026-10-24'),
 (50, 150, '2026-10-25'), (26, 101, '2026-10-26'), (27, 102, '2026-10-27'),
-(28, 103, '2026-10-28'), (29, 104, '2026-10-29'), (30, 105, '2026-10-30'
+(28, 103, '2026-10-28'), (29, 104, '2026-10-29'), (30, 105, '2026-10-30'),
 (6, 101, '2026-09-26'),
 (7, 108, '2026-09-29'),
-(8, 115, '2026-10-02'), 
-ON CONFLICT (User_ID, Restaurant_ID) DO NOTHING;;
+(8, 115, '2026-10-02')
+ON CONFLICT (User_ID, Restaurant_ID) DO NOTHING;
