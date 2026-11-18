@@ -100,7 +100,7 @@ def search_restaurants(conn, name=None, cuisine=None, max_price=None, zip_min=No
     Return: list of dicts with keys restaurant_id, name, cuisine, min_price, max_price,
     restaurant_zip, open_now, avg_rating (None if no reviews), num_reviews.
     Best-rated first, then by name. """
-    
+
     filter_search = conn.execute(text("""SELECT R.Restaurant_ID, R.Name, R.Cuisine, R.Min_price, R.Max_price,
       R.Restaurant_zip, R.Open_now, AVG(W.Rating) AS avg_rating, COUNT(W.Rating) AS num_reviews
       FROM Restaurant R
@@ -167,16 +167,14 @@ def list_reviews(conn, restaurant_id):
 # ---------------------------------------------------------------------------
 
 def find_available_tables(conn, res_date, res_time, party_size, restaurant_ids=None):
-    """PLACEHOLDER (changed after our team meeting; the old version is in git history, commit 34adfb2).
-
-    Tables that are free at the requested date and time and big enough. The Find restaurants page
+    """Tables that are free at the requested date and time and big enough. The Find restaurants page
     calls this ONCE with the ids of the restaurants it is showing, then displays each restaurant's
     free tables under it. A restaurant can now have several kinds of table (Booth, Bar, Window Seat...).
 
     Arguments: res_date (datetime.date), res_time (datetime.time), party_size (int),
     restaurant_ids (list of ints, or None = all restaurants).                                  <- CHANGED (was cuisine)
 
-    Return: list of dicts with keys restaurant_id, table_no, capacity, seating_type.
+    Return: list of dicts with keys restaurant_id, restaurant_name, table_no, capacity, seating_type.
     Order by restaurant_id, then capacity, then table_no.
 
     Rules
@@ -191,6 +189,20 @@ def find_available_tables(conn, res_date, res_time, party_size, restaurant_ids=N
         and treat None as "no filter" with (:ids IS NULL OR ...)  (you may need CAST(:ids AS INTEGER[])).
     Course idea: NOT EXISTS subquery (Part 2 query 2), joins, parameters.
     """
+    buffer_time_seconds = BOOKING_BUFFER_MINUTES * 60 #10 minutes buffer time 
+    available_tables = conn.execute(text("""WITH Taken_Tables AS (SELECT R.Restaurant_ID, R.Table_No FROM Reservation R
+     WHERE R.Res_Date = :res_date AND R.Status != 'cancelled' AND ABS(EXTRACT(EPOCH FROM(R.Res_Time - :res_time))) < :buffer_time)
+     SELECT R.Restaurant_ID, R.Name as restaurant_name, T.Table_No, T.Capacity, T.Seating_type
+     FROM Restaurant R
+     JOIN RestaurantTable T ON R.Restaurant_ID = T.Restaurant_ID
+     LEFT JOIN Taken_Tables as TB ON R.Restaurant_ID = TB.Restaurant_ID AND T.Table_No = TB.Table_No
+     WHERE T.Capacity >= :party_size AND ((R.Open_time <= R.Close_time AND R.Open_time <= :res_time AND :res_time < R.Close_time)
+     OR (R.Open_time > R.Close_time AND (:res_time >= R.Open_time OR :res_time < R.Close_time))) 
+     AND (:restaurant_ids is NULL OR R.Restaurant_ID IN :restaurant_ids) AND TB.Table_No IS NULL 
+     ORDER BY R.Name, T.Capacity, T.Table_No"""),
+     {"restaurant_ids": tuple(restaurant_ids) if restaurant_ids else None, "party_size": party_size, "cuisine": cuisine, "res_date": res_date, "res_time": res_time})
+    found_available_tables = rows_to_dicts(available_tables)
+    return found_available_tables
     todo("find_available_tables")
 
 
