@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: flask
-        image: us-east1-docker.pkg.dev/intro-db-512023/web/project1-web:v1
+        image: us-east1-docker.pkg.dev/intro-db-512023/web/project1-web:v2
         ports:
         - containerPort: 8080
         env:
