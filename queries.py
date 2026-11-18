@@ -318,9 +318,25 @@ def create_reservation(conn, user_id, restaurant_id, table_no, res_date, res_tim
 # A user's reservations  (proposal overview: view and cancel)
 # ---------------------------------------------------------------------------
 
+def complete_past_reservations(conn, user_id=None):
+    """Mark 'booked' reservations whose date and time have passed (New York
+    time) as 'completed'. Nothing runs in the background, so this is called
+    before reading reservations or checking whether a review is allowed.
+    One UPDATE, so it is safe to run at any time and repeatedly."""
+    conn.execute(text("""
+        UPDATE Reservation SET Status = 'completed'
+        WHERE Status = 'booked'
+          AND (Res_Date + Res_Time) <= """ + NYC_NOW + """
+          AND (CAST(:user_id AS INTEGER) IS NULL OR User_ID = CAST(:user_id AS INTEGER))"""),
+        {"user_id": user_id})
+    conn.commit()
+
+
 def list_reservations(conn, user_id):
     """All reservations of one user with restaurant and payment details,
-    newest first. The payment is an outer join in case a reservation has none."""
+    newest first. The payment is an outer join in case a reservation has none.
+    Past 'booked' reservations are first marked 'completed'."""
+    complete_past_reservations(conn, user_id)
     result = conn.execute(text("""
         SELECT V.Reservation_ID AS reservation_id, V.Restaurant_ID AS restaurant_id,
                R.Name AS restaurant_name, V.Table_No AS table_no, V.Res_Date AS res_date,
@@ -367,6 +383,7 @@ def add_review(conn, user_id, restaurant_id, rating, rating_text):
     schema cannot express, so it is checked here), and at most one review per
     user per restaurant (the UNIQUE constraint enforces it).
     """
+    complete_past_reservations(conn, user_id)
     visited = conn.execute(text("""
         SELECT EXISTS (SELECT 1 FROM Reservation
                        WHERE User_ID = :user_id AND Restaurant_ID = :restaurant_id
