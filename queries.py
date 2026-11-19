@@ -99,7 +99,8 @@ def search_restaurants(conn, name=None, cuisine=None, max_price=None, zip_min=No
 
     Return: list of dicts with keys restaurant_id, name, cuisine, min_price, max_price,
     restaurant_zip, open_now, avg_rating (None if no reviews), num_reviews.
-    Best-rated first, then by name. """
+    Order: only zip_min given -> zip ascending; only zip_max given -> zip descending;
+    then best-rated first, then by name. """
 
     filter_search = conn.execute(text("""SELECT R.Restaurant_ID, R.Name, R.Cuisine, R.Min_price, R.Max_price,
       R.Restaurant_zip, R.Open_now, AVG(W.Rating) AS avg_rating, COUNT(W.Rating) AS num_reviews
@@ -109,7 +110,11 @@ def search_restaurants(conn, name=None, cuisine=None, max_price=None, zip_min=No
       AND (:max_price is NULL OR R.Max_price <= :max_price) AND (:zip_min is NULL OR R.Restaurant_zip >= :zip_min) 
       AND (:zip_max is NULL OR R.Restaurant_zip <= :zip_max) AND (NOT :open_now OR R.Open_now)
       GROUP BY R.Restaurant_ID, R.Name, R.Cuisine, R.Min_price, R.Max_price, R.Open_now, R.Restaurant_zip
-      ORDER BY avg_rating DESC NULLS LAST, R.Name ASC"""), 
+      ORDER BY
+        CASE WHEN :zip_min IS NOT NULL AND :zip_max IS NULL THEN R.Restaurant_zip END ASC,
+        CASE WHEN :zip_min IS NULL AND :zip_max IS NOT NULL THEN R.Restaurant_zip END DESC,
+        avg_rating DESC NULLS LAST,
+        R.Name ASC"""), 
       {"name": name, "cuisine": cuisine, "max_price": max_price, "zip_min": zip_min, "zip_max": zip_max, "open_now": open_now})
     return rows_to_dicts(filter_search)
 
